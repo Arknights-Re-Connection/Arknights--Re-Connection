@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720">
+  <defs>
+    <filter id="grain"><feTurbulence type="fractalNoise" baseFrequency=".012 .31" numOctaves="3" seed="21"/><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncA type="linear" slope=".18"/></feComponentTransfer><feBlend in="SourceGraphic" mode="soft-light"/></filter>
+    <linearGradient id="wood" x2="0" y2="1"><stop stop-color="#4e3b2c"/><stop offset=".5" stop-color="#382a20"/><stop offset="1" stop-color="#4a382a"/></linearGradient>
+    <pattern id="planks" width="1200" height="180" patternUnits="userSpaceOnUse"><path fill="url(#wood)" d="M0 0h1200v180H0z"/><path d="M0 1h1200M0 178h1200" stroke="#1e1812" stroke-width="2"/><path d="M0 5h1200" stroke="#927553" opacity=".17"/><path d="M0 28c200-14 370 20 560 5s420-17 640 0M0 67c250 8 520-22 780-5s300 12 420 1M0 112c230-8 390 11 570-3s420 9 630-2M0 157c300-18 500 12 820-5s210 0 380 1" stroke="#aa8a5e" opacity=".07" fill="none"/></pattern>
+  </defs>
+  <path fill="url(#planks)" filter="url(#grain)" d="M0 0h1200v720H0z"/>
+</svg>
