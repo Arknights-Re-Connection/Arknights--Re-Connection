@@ -1,3 +1,4 @@
+
 export type Side = 'blue' | 'red';
 export type Direction = 0 | 1 | 2 | 3;
 export type Position = { r: number; c: number };

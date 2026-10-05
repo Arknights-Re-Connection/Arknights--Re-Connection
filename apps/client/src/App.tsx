@@ -45,6 +45,7 @@ export function App() {
   const [viewer, setViewer] = useState<Side>('blue');
   const [handoff, setHandoff] = useState<Side>();
   const [selected, setSelected] = useState<string>();
+  const [previewed, setPreviewed] = useState<string>();
   const [intent, setIntent] = useState<Intent>('inspect');
   const [focused, setFocused] = useState<Position>();
   const [hovered, setHovered] = useState<Position>();
@@ -67,13 +68,14 @@ export function App() {
   }, [game]);
   useEffect(() => { if (toast) { const timer = setTimeout(() => setToast(undefined), 4500); return () => clearTimeout(timer); } }, [toast]);
   useEffect(() => {
-    const cancel = (e: KeyboardEvent) => { if (e.key === 'Escape') { setPending(undefined); setPanel(undefined); setIntent('inspect'); } };
+    const cancel = (e: KeyboardEvent) => { if (e.key === 'Escape') { setPending(undefined); setPanel(undefined); setIntent('inspect'); setSelected(undefined); } };
     window.addEventListener('keydown', cancel); return () => window.removeEventListener('keydown', cancel);
   }, []);
   const view = useMemo(() => game ? getView(game, viewer) : undefined, [game, viewer]);
-  const selectedCard = selected ? view?.visibleCards[selected] : undefined;
+  const shown = selected ?? previewed;
+  const selectedCard = shown ? view?.visibleCards[shown] : undefined;
   const data = selectedCard ? catalog[selectedCard.definition] : undefined;
-  const unit = selected ? game?.units[selected] : undefined;
+  const unit = shown ? game?.units[shown] : undefined;
   const friendly = unit && unit.owner === viewer;
   const active = game?.active === viewer;
   const onAction = (action: Action) => {
@@ -82,20 +84,20 @@ export function App() {
     if (!result.ok) { setToast(result.error); return; }
     setGame(result.state); setPending(undefined); setDiscardSelection([]); setIntent('inspect');
     if (result.state.active !== game.active && result.state.phase !== 'over') {
-      setHandoff(result.state.active); setSelected(undefined); setFocused(undefined);
+      setHandoff(result.state.active); setSelected(undefined); setFocused(undefined); setPreviewed(undefined);
     }
-    if (selected && result.state.cards[selected]?.zone !== 'board') setSelected(undefined);
+    if (selected && result.state.cards[selected]?.zone !== 'board') { setSelected(undefined); setPreviewed(undefined); }
   };
   function start(mode: 'local' | 'demo') {
     const invalid = validateDeck(deck); if (invalid && mode === 'local') { setToast(invalid); return; }
     const next = createGame(mode, mode === 'demo' ? 42 : Date.now(), mode === 'demo' ? undefined : { blue: deck, red: deck });
-    setGame(next); setViewer('blue'); setPage('battle'); setSelected(undefined); setIntent('inspect'); setPanel(undefined); setHandoff(undefined);
+    setGame(next); setViewer('blue'); setPage('battle'); setSelected(undefined); setPreviewed(undefined); setIntent('inspect'); setPanel(undefined); setHandoff(undefined);
     lastSaved.current = undefined;
   }
   async function resume() {
     try { const saved = await readSave(); if (!saved) return setToast('没有可继续的本地对局');
       setGame(saved); setPage('battle'); setViewer(saved.active); setHandoff(saved.phase === 'over' ? undefined : saved.active);
-      setSelected(undefined); setPanel(undefined); setPending(undefined); setIntent('inspect');
+      setSelected(undefined); setPreviewed(undefined); setPanel(undefined); setPending(undefined); setIntent('inspect');
       lastSaved.current = undefined;
     } catch (e) { setToast(e instanceof Error ? e.message : '存档读取失败'); }
   }
@@ -143,7 +145,7 @@ export function App() {
   function dropOnMap(e: React.DragEvent<HTMLElement>) {
     e.preventDefault();
     if (!game || !active || game.phase !== 'action') return;
-    const id = e.dataTransfer.getData('text/plain'), card = view?.visibleCards[id];
+    const id = e.dataTransfer.getData('application/x-card-id'), card = view?.visibleCards[id];
     if (!card || card.owner !== viewer || card.zone !== 'hand') return;
     const canvas = e.currentTarget.querySelector('canvas'); if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -203,7 +205,7 @@ export function App() {
     <h3>原型边界</h3><p>当前卡牌与原创矢量插画为测试内容。无正式卡池、AI、联机及反制卡；支持本机轮流对局和预设演练。灼燃保留“再次爆发变 3 点”，免疫期间基础元素仍为 1。双方各二十回合后依次比得分、指挥点上限。</p>
   </div>;
 
-  return <div className={`app ${viewer} page-${page}`} onContextMenu={e => { e.preventDefault(); setPending(undefined); setIntent('inspect'); }}>
+  return   <div className={`app ${viewer} page-${page}`} onContextMenu={e => { e.preventDefault(); setPending(undefined); setIntent('inspect'); setSelected(undefined); }}>
     <header className="topbar"><button className="brand" onClick={() => { setPage('home'); setPanel(undefined); }}><Mark small /><span>RE:CONNECTION<small>明日方舟 — 再连接</small></span></button>
       <span className="build-badge"><i /> 战术牌桌 <b>0.2</b></span>
       <nav><button onClick={() => setPanel('rules')}>规则手册</button><button onClick={() => setPanel('settings')}>设置</button>
@@ -263,7 +265,7 @@ export function App() {
         <section className="map-section" onDragOver={e => e.preventDefault()} onDrop={dropOnMap}><div className="map-topline"><span>战场网格 · 9 × 9</span><span>{hovered && gridCoords ? `R${displayPosition(hovered, viewer).r}C${displayPosition(hovered, viewer).c}` : '选择卡牌或干员'}</span></div>
           <Board model={boardModel} onCell={cellClick} onHover={setHovered} />
           <div className="map-bottomline"><span>{intent === 'deploy' ? '选择部署区与朝向' : intent === 'move' ? '选择落点与朝向' : intent === 'attack' ? '选择敌方干员' : intent === 'heal' ? '选择受伤的己方干员' : intent === 'command' ? '选择指令目标' : '左键选择 · 右键取消 · Esc 返回'}</span>
-            {intent !== 'inspect' && <button onClick={() => setIntent('inspect')}>取消选择 ×</button>}</div></section>
+            {intent !== 'inspect' && <button onClick={() => { setIntent('inspect'); setSelected(undefined); }}>取消选择 ×</button>}</div></section>
         <aside className="operation-right">
           <div className="section-label">干员档案 <span>FIELD DOSSIER</span></div>
           <div className="detail-scroll">
@@ -292,7 +294,7 @@ export function App() {
                 {!unit && <p className="hint">从手牌选择干员后，点击地图中高亮的我方部署格。</p>}
               </> : <>
                 <CardArt data={data} large /><div className="cost-detail"><span>基础 / 当前使用费</span><b>{data.cost} / {selectedCard.cost} ◇</b></div>
-                {data.target === 'global' ? <button className="primary full" onClick={() => requestCommand(selectedCard)}>使用此指令</button> : <p className="hint">选择高亮的{data.target === 'ally' ? '己方' : '敌方'}干员；也可以将卡牌直接拖向地图。</p>}
+                {data.target === 'global' ? (selected ? <button className="primary full" onClick={() => requestCommand(selectedCard)}>使用此指令</button> : <p className="hint">点击选中这张指令卡后即可使用。</p>) : <p className="hint">选择高亮的{data.target === 'ally' ? '己方' : '敌方'}干员；也可以将卡牌直接拖向地图。</p>}
               </>}
             </> : <div className="detail-empty"><Mark /><h3>等待战术指令</h3><p>选择手牌以部署干员，<br />选择地图单位查看作战信息。</p><span>SELECT AN OPERATOR</span></div>}
             {focused && unitsAt(game, focused).length > 0 && <div className="cell-queue"><span className="eyebrow">当前区块队列</span>{unitsAt(game, focused).map((u, i) => <button key={u.id} onClick={() => chooseUnit(u)}><i className={u.owner === viewer ? 'friendly-dot' : 'enemy-dot'} /><span>{definition(game, u.id).name}</span><small>{u.hp} HP</small><b>#{i + 1}</b></button>)}</div>}
@@ -304,12 +306,13 @@ export function App() {
         <Resource player={view.players[viewer]} />
         <button className="pile discard" onClick={() => { setPile({ side: viewer, zone: 'discard' }); setPanel('pile'); }}><span className="pile-glyph">▤</span><b>{view.players[viewer].discard.length}</b><span>弃牌堆</span></button>
         <div className="hand-area"><div className="hand-label"><span>我方手牌 <b>{view.players[viewer].handCount}/8</b></span><span>{active ? '选择或拖动卡牌' : '等待回合交接'}</span></div>
-          <div className="hand-cards">{handoff ? Array.from({ length: view.players[viewer].handCount }, (_, i) => <div className="card-back" key={i}><Mark small /></div>) : view.players[viewer].hand?.map((card, index, cards) => {
+          <div className={`hand-cards ${selected ? 'locked' : ''}`}>{handoff ? Array.from({ length: view.players[viewer].handCount }, (_, i) => <div className="card-back" key={i}><Mark small /></div>) : view.players[viewer].hand?.map((card, index, cards) => {
             const d = catalog[card.definition]; const playable = active && game.phase === 'action' && card.cost <= game.players[viewer].cp && (d.kind === 'command' || game.players[viewer].deployed < 2);
             return <button className={`hand-card ${selected === card.id ? 'selected' : ''} ${d.kind === 'command' ? 'command' : ''} ${playable ? 'playable' : 'unaffordable'}`} key={card.id}
               style={{ '--fan': `${(index - (cards.length - 1) / 2) * 2.4}deg`, '--fan-lift': `${Math.abs(index - (cards.length - 1) / 2) * 2}px` } as React.CSSProperties}
               data-testid={`card-${card.definition}`} aria-label={`${d.name}，${card.cost}费`} onClick={() => chooseCard(card)}
-              draggable={active && game.phase === 'action'} onDragStart={e => { chooseCard(card); e.dataTransfer.setData('text/plain', card.id); }}>
+              onMouseEnter={() => setPreviewed(card.id)} onMouseLeave={() => setPreviewed(p => (p === card.id ? undefined : p))}
+              draggable={active && game.phase === 'action'} onDragStart={e => { chooseCard(card); e.dataTransfer.setData('application/x-card-id', card.id); }}>
               <div className="card-top"><span>{d.profession ?? `${d.grade} 指令`}</span><b className={card.cost > d.cost ? 'increased' : ''}>◇{card.cost}</b></div>
               <CardArt data={d} /><div className="card-bottom"><strong>{d.name}</strong><span>{d.kind === 'operator' ? `${d.mode === 'melee' ? '近战' : '远程'} · ${d.profession === '医疗' ? '医疗' : d.damage === 'arts' ? '法术' : d.damage === 'true' ? '真实' : '物理'}` : d.target === 'global' ? '全局指令' : d.target === 'ally' ? '己方目标' : '敌方目标'}</span></div>
               {d.kind === 'operator' && <div className="card-combat"><b title={d.profession === '医疗' ? '治疗量' : '攻击力'}>{d.power}</b><span>{professionShort[d.profession!]}</span><b title="生命">{d.hp}</b></div>}<i className="test-stamp">TEST</i>

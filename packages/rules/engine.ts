@@ -1,3 +1,6 @@
+
+// 规则引擎：全部游戏裁定的唯一实现，不依赖任何界面；网页 / 桌面 / 联机共用。
+// 约定：动作总是在克隆状态上执行，校验失败抛错，由 applyAction 统一捕获返回。
 import { catalog, defaultDeck, validateDeck, CONTENT_VERSION } from '../content';
 import type { Action, CardDefinition, CardInstance, Direction, Element, GameState, Outcome, Player, PlayerView, Position, Side, Unit } from './types';
 
@@ -8,26 +11,32 @@ export const sideName = (side: Side) => side === 'blue' ? '蓝方' : '红方';
 export const elementName: Record<Element, string> = { burn: '灼燃', nerve: '神经', decay: '凋亡' };
 export const samePosition = (a: Position, b: Position) => a.r === b.r && a.c === b.c;
 export const inside = (p: Position) => Number.isInteger(p.r) && Number.isInteger(p.c) && p.r >= 1 && p.r <= 9 && p.c >= 1 && p.c <= 9;
+// 统一失败出口：任何校验不通过都抛错
 function fail(message: string): never { throw new Error(message); }
+// 由卡实例 id 查其卡牌定义（数值面板）
 export function definition(s: GameState, id: string): CardDefinition {
   const card = s.cards[id];
   if (!card || !catalog[card.definition]) return fail('卡牌不存在');
   return catalog[card.definition];
 }
+// 写作战日志，最多保留 100 条
 function log(s: GameState, text: string) {
   s.logs.push({ id: ++s.sequence, turn: s.turn, text });
   if (s.logs.length > 100) s.logs.shift();
 }
+// 线性同余伪随机：种子相同则整局洗牌序列一致，可复现
 function random(s: GameState) {
   s.rng = (Math.imul(s.rng, 1664525) + 1013904223) >>> 0;
   return s.rng / 4294967296;
 }
+// Fisher–Yates 洗牌，随机源取自状态内 rng
 function shuffle<T>(s: GameState, list: T[]) {
   for (let i = list.length - 1; i > 0; i--) {
     const j = Math.floor(random(s) * (i + 1));
     [list[i], list[j]] = [list[j], list[i]];
   }
 }
+// 双方部署区：底线 5 格 + 第二行 3 格
 export function deploymentArea(side: Side): Position[] {
   return side === 'blue'
     ? [3, 4, 5, 6, 7].map(c => ({ r: 9, c })).concat([4, 5, 6].map(c => ({ r: 8, c })))
@@ -35,27 +44,34 @@ export function deploymentArea(side: Side): Position[] {
 }
 export const isDeployment = (side: Side, p: Position) => deploymentArea(side).some(x => samePosition(x, p));
 export const targetFor = (side: Side): Position => ({ r: side === 'blue' ? 1 : 9, c: 5 });
+// 某格上的单位，按进场先后排序（队首在最前）
 export function unitsAt(s: GameState, p: Position, side?: Side) {
   return Object.values(s.units).filter(u => samePosition(u, p) && (!side || u.owner === side)).sort((a, b) => a.entered - b.entered);
 }
+// 某格某方的阻挡干员（block > 0 才参与阻挡与自动交战）
 function fightersAt(s: GameState, p: Position, side: Side) {
   return unitsAt(s, p, side).filter(u => definition(s, u.id).block! > 0);
 }
+// 准入容量：格内有敌方阻挡位时以其 block 数为限，否则 3
 export function capacity(s: GameState, p: Position, side: Side) {
   const enemy = fightersAt(s, p, other(side))[0];
   return enemy ? Math.min(3, definition(s, enemy.id).block!) : 3;
 }
+// 该方单位能否进入此格：不超容量也不超同格 3 人
 export function canEnter(s: GameState, p: Position, side: Side) {
   return inside(p) && unitsAt(s, p, side).length < capacity(s, p, side) && unitsAt(s, p, side).length < 3;
 }
+// 干员是否被敌方阻挡（被贴脸阻挡时不能主动移动）
 export function blocked(s: GameState, u: Unit) {
   return definition(s, u.id).block! > 0 && fightersAt(s, u, other(u.owner)).length > 0;
 }
 export const frozen = (s: GameState, u: Unit) => u.frozenUntil >= s.turn;
+// 把卡面相对坐标按朝向旋转（0上 1右 2下 3左）
 export function rotatedOffset(dr: number, dc: number, direction: Direction): [number, number] {
   for (let k = 0; k < direction; k++) [dr, dc] = [dc, -dr];
   return [dr, dc];
 }
+// 当前朝向下的范围格（裁掉地图外的）
 export function attackRange(s: GameState, u: Unit) {
   return definition(s, u.id).range!.map(([dr, dc]) => {
     const [r, c] = rotatedOffset(dr, dc, u.direction);
@@ -65,7 +81,9 @@ export function attackRange(s: GameState, u: Unit) {
 export function inRange(s: GameState, u: Unit, p: Position) {
   return attackRange(s, u).some(x => samePosition(x, p));
 }
+// 寒冷层数带来的额外行动费：1 层 +1，2 层 +3
 export function coldCost(u: Unit) { return u.cold === 1 ? 1 : u.cold >= 2 ? 3 : 0; }
+// 移动费按职业区分：先锋近距 0/远距 3、重装 1、近卫/特种 3、其余 2，再叠加寒冷
 export function moveCost(s: GameState, u: Unit, p: Position) {
   const profession = definition(s, u.id).profession;
   const distance = Math.abs(u.r - p.r) + Math.abs(u.c - p.c);
@@ -73,27 +91,33 @@ export function moveCost(s: GameState, u: Unit, p: Position) {
     : profession === '重装' ? 1 : profession === '近卫' || profession === '特种' ? 3 : 2;
   return base + coldCost(u);
 }
+// 攻击/治疗费：治疗与远程 2 点、近战 1 点；技能期间弹药型每次 +skillK、爆发型按次数翻倍
 export function actionCost(s: GameState, u: Unit, healing = false) {
   const d = definition(s, u.id);
   const base = healing || d.mode === 'ranged' ? 2 : 1;
   const cost = u.skillActive ? d.skill!.type === 'ammo' ? base + u.skillK : base * 2 ** u.skillK : base;
   return cost + (healing ? 0 : coldCost(u));
 }
+// 扣指挥点，不足则失败
 function pay(s: GameState, side: Side, amount: number) {
   if (!Number.isFinite(amount) || amount < 0 || s.players[side].cp < amount) fail(`指挥点不足，需要 ${amount} 点`);
   s.players[side].cp -= amount;
 }
+// 取当前回合方的场上单位，否则失败
 function requireUnit(s: GameState, id: string) {
   const u = s.units[id];
   if (!u) return fail('干员不在场上');
   if (u.owner !== s.active) fail('只能操作当前回合方的干员');
   return u;
 }
+// 行动前置限制：部署当回合与冻结期不能行动
 function readyToAct(s: GameState, u: Unit) {
   if (u.deployed === s.turn) fail('部署当回合不能移动、攻击或治疗');
   if (frozen(s, u)) fail('干员被冻结');
 }
+// 关闭技能并清空弹药与次数计数（进入回转）
 function closeSkill(u: Unit) { u.skillActive = false; u.charge = 0; u.ammo = 0; u.skillK = 0; }
+// 卡实例进弃牌堆：increment 为本次事件带来的费用增长（封顶于指挥点上限）
 function discardInstance(s: GameState, id: string, increment: number) {
   const card = s.cards[id];
   card.zone = 'discard';
@@ -101,6 +125,7 @@ function discardInstance(s: GameState, id: string, increment: number) {
   s.players[card.owner].discard.push(id);
   shuffle(s, s.players[card.owner].discard);
 }
+// 单位离场：得分=永久移除并计 1 分；被击败/撤退=进弃牌堆且卡费 +15/+5
 function removeUnit(s: GameState, id: string, reason: 'defeat' | 'retreat' | 'score') {
   const u = s.units[id];
   if (!u) return;
@@ -116,14 +141,17 @@ function removeUnit(s: GameState, id: string, reason: 'defeat' | 'retreat' | 'sc
     log(s, `${sideName(u.owner)}「${d.name}」${reason === 'defeat' ? '被击败' : '撤退'}，进入弃牌堆，后续部署费 ${s.cards[id].cost}`);
   }
 }
+// 结束对局并记录胜负原因
 function finish(s: GameState, winner: Side | 'draw', result: string) {
   s.phase = 'over'; s.winner = winner; s.result = result; s.pendingStart = false;
   log(s, `${winner === 'draw' ? '平局' : `${sideName(winner)}胜利`}：${result}`);
 }
+// 清理场上所有生命 ≤0 的单位
 function defeatCheck(s: GameState) {
   const ids = Object.values(s.units).filter(u => u.hp <= 0).map(u => u.id);
   ids.forEach(id => removeUnit(s, id, 'defeat'));
 }
+// 结算抵达得分：目标点无敌方阻挡位时，站在上面的己方单位逐一得分并永久移除
 function checkScores(s: GameState) {
   for (const side of sides) {
     const p = targetFor(side);
@@ -134,6 +162,7 @@ function checkScores(s: GameState) {
     }
   }
 }
+// 伤害公式：力量（含技能加成）− 物甲/法抗；法术打灼燃目标 +1，打队首 −1；医疗与冻结者输出为 0
 export function damageValue(s: GameState, from: Unit, to: Unit, rear = false) {
   const a = definition(s, from.id), b = definition(s, to.id);
   if (a.profession === '医疗' || frozen(s, from)) return 0;
@@ -141,6 +170,7 @@ export function damageValue(s: GameState, from: Unit, to: Unit, rear = false) {
   const defense = a.damage === 'physical' ? b.armor! : a.damage === 'arts' ? b.resist! : 0;
   return Math.max(0, Math.max(0, power - defense) + (a.damage === 'arts' && to.burnUntil >= s.turn ? 1 : 0) - (rear ? 1 : 0));
 }
+// 同格自动交战：双方队首互殴；只有出现减员才继续结算，双方存活则等下一个全局回合
 function resolveClash(s: GameState, p: Position) {
   // Continue only after a casualty; two survivors wait for the next global turn.
   while (s.phase !== 'over') {
@@ -155,12 +185,14 @@ function resolveClash(s: GameState, p: Position) {
   }
   checkScores(s);
 }
+// 全图扫描所有对峙格并逐一结算
 function resolveAllClashes(s: GameState) {
   for (let r = 1; r <= 9 && !s.winner; r++) for (let c = 1; c <= 9 && !s.winner; c++) {
     if (fightersAt(s, { r, c }, 'blue').length && fightersAt(s, { r, c }, 'red').length) resolveClash(s, { r, c });
   }
   checkScores(s);
 }
+// 抽牌：牌库空则把弃牌堆洗回（卡费保留）；手牌超 8 张进入弃牌阶段
 function draw(s: GameState, side: Side, amount: number) {
   const p = s.players[side]; let count = 0;
   for (let i = 0; i < amount; i++) {
@@ -175,6 +207,7 @@ function draw(s: GameState, side: Side, amount: number) {
   log(s, `${sideName(side)}抽 ${count} 张牌`);
   if (p.hand.length > 8) { s.phase = 'discard'; log(s, `${sideName(side)}手牌超限，需弃 ${p.hand.length - 8} 张`); }
 }
+// 回合开始：回 8 指挥点、重置己方行动标记、非技能单位充能 +1、抽 2 张，随后结算自动交战
 function beginTurn(s: GameState) {
   const p = s.players[s.active]; p.ownTurn++; p.deployed = 0; p.cp = Math.min(p.cap, p.cp + 8);
   s.phase = 'action'; s.pendingStart = true;
@@ -187,15 +220,18 @@ function beginTurn(s: GameState) {
   draw(s, s.active, 2);
   if (s.phase === 'action') { s.pendingStart = false; resolveAllClashes(s); }
 }
+// 初始玩家状态：5 指挥点、上限 100、0 分
 function emptyPlayer(): Player {
   return { cp: 5, cap: 100, score: 0, ownTurn: 0, deployed: 0, deck: [], hand: [], discard: [], removed: [] };
 }
+// 按卡定义新建场上单位（满生命、零充能与状态）
 export function newUnit(s: GameState, id: string, p: Position, direction: Direction): Unit {
   return { id, owner: s.cards[id].owner, ...p, direction, entered: ++s.sequence, hp: definition(s, id).hp!, deployed: s.turn,
     moved: false, attacked: false, charge: 0, skillActive: false, skillK: 0, ammo: 0, skillOpened: -1, extraCharge: 0,
     cold: 0, frozenUntil: 0, burnUntil: 0, immuneUntil: 0, smoke: false, nerve: false, lockUntilOwnTurn: 0,
     elements: { burn: 0, nerve: 0, decay: 0 }, lastElement: { burn: 0, nerve: 0, decay: 0 } };
 }
+// 开局：校验双方构筑 → 生成各 30 张实例并洗牌 → 先手 13 点/5 张、后手 5 点/4 张
 export function createGame(mode: 'local' | 'demo' = 'local', seed = Date.now(), decks: Record<Side, string[]> = { blue: defaultDeck, red: defaultDeck }): GameState {
   for (const side of sides) { const error = validateDeck(decks[side]); if (error) fail(error); }
   const s: GameState = { schema: 1, rulesVersion: RULES_VERSION, contentVersion: CONTENT_VERSION, mode, turn: 1, active: 'blue',
@@ -212,6 +248,7 @@ export function createGame(mode: 'local' | 'demo' = 'local', seed = Date.now(), 
   if (mode === 'demo') setDemo(s);
   return s;
 }
+// 演练模式：预置双方棋子、24 指挥点与指定手牌，便于快速体验战斗
 function setDemo(s: GameState) {
   s.turn = 5; s.players.blue.ownTurn = 3; s.players.red.ownTurn = 2;
   s.players.blue.cp = 24; s.players.red.cp = 24;
@@ -240,6 +277,7 @@ function setDemo(s: GameState) {
   log(s, '战术演练：预设场上单位与 24 点指挥点，仅用于快速体验；正常对局按 PRD 空场开局');
 }
 function validateDirection(direction: Direction) { if (![0, 1, 2, 3].includes(direction)) fail('朝向不合法'); }
+// 移动合法性：先查通用限制，再按职业查路径（特种落点须在范围内、先锋十字 1~2 格、其余相邻一格）
 function validateMove(s: GameState, u: Unit, p: Position) {
   readyToAct(s, u);
   if (u.moved) fail('本回合已经移动');
@@ -258,6 +296,7 @@ function validateMove(s: GameState, u: Unit, p: Position) {
   } else if (Math.abs(dr) + Math.abs(dc) !== 1) fail('只能移动至相邻十字格');
   if (!canEnter(s, p, u.owner)) fail('目的格已达准入容量');
 }
+// 穷举全图格子，返回当前指挥点够得着的合法落点（供界面高亮）
 export function legalMoves(s: GameState, id: string): Position[] {
   const u = s.units[id]; if (!u || u.owner !== s.active || s.phase !== 'action') return [];
   const list: Position[] = [];
@@ -266,6 +305,7 @@ export function legalMoves(s: GameState, id: string): Position[] {
   }
   return list;
 }
+// 消耗一次攻击/治疗次数并扣费：非技能一回合一次；技能期间放开次数（弹药型耗弹药）
 function consumeAttack(s: GameState, u: Unit, healing: boolean) {
   readyToAct(s, u);
   if (!u.skillActive && u.attacked) fail(healing ? '本回合已经治疗' : '本回合已经攻击');
@@ -274,6 +314,7 @@ function consumeAttack(s: GameState, u: Unit, healing: boolean) {
   pay(s, u.owner, actionCost(s, u, healing)); u.attacked = true;
   if (u.skillActive) { u.skillK++; if (d.skill!.type === 'ammo') u.ammo--; }
 }
+// 施加元素伤害：每次 1 点真实伤害；累计满 9 层触发损伤，之后两回合免疫不再累计
 export function applyElement(s: GameState, id: string, element: Element, amount = 1) {
   for (let i = 0; i < amount; i++) {
     const u = s.units[id]; if (!u) return;
@@ -295,6 +336,7 @@ export function applyElement(s: GameState, id: string, element: Element, amount 
     defeatCheck(s);
   }
 }
+// 使用指令卡：校验手牌与目标阵营 → 扣费 → 结算效果（此时卡不在弃牌堆）→ 完事后入弃牌堆且卡费 +15
 function useCommand(s: GameState, a: Extract<Action, { type: 'command' }>) {
   const card = s.cards[a.card]; if (!card || card.owner !== s.active || card.zone !== 'hand') fail('指令不在己方手牌中');
   const d = definition(s, a.card); if (d.kind !== 'command') fail('这不是指令卡');
@@ -323,6 +365,7 @@ function useCommand(s: GameState, a: Extract<Action, { type: 'command' }>) {
   if (target && !s.units[target.id]) resolveClash(s, target);
   checkScores(s);
 }
+// 动作总入口：弃牌阶段只收弃牌；end 结算状态衰减与回合交替（第 40 回合终局判定）
 function perform(s: GameState, a: Action) {
   if (s.phase === 'over') fail('对局已经结束');
   if (s.phase === 'discard') {
@@ -337,6 +380,7 @@ function perform(s: GameState, a: Action) {
   }
   if (a.type === 'discard') fail('当前无需超限弃牌');
   if (a.type === 'end') {
+    // 结束回合：全场状态衰减（寒冷/冻结/灼燃/免疫），爆发型技能关闭
     for (const u of Object.values(s.units)) {
       u.cold = Math.max(0, u.cold - 1);
       if (u.frozenUntil === s.turn) u.frozenUntil = 0;
@@ -353,6 +397,7 @@ function perform(s: GameState, a: Action) {
   }
   if (a.type === 'command') { useCommand(s, a); return; }
   if (a.type === 'deploy') {
+    // 部署：校验手牌、每回合 2 次上限、部署区与容量 → 扣费落位 → 结算该格交战
     validateDirection(a.direction);
     const card = s.cards[a.card];
     if (!card || card.owner !== s.active || card.zone !== 'hand' || definition(s, a.card).kind !== 'operator') fail('干员不在己方手牌中');
@@ -368,6 +413,7 @@ function perform(s: GameState, a: Action) {
   const u = requireUnit(s, a.unit), d = definition(s, u.id);
   if (a.type === 'retreat') { const p = { r: u.r, c: u.c }; removeUnit(s, u.id, 'retreat'); resolveClash(s, p); return; }
   if (a.type === 'skill') {
+    // 开启技能：需充能完成，且同一己方回合只能开一次
     if (frozen(s, u)) fail('冻结期间不能开启技能');
     if (u.skillActive) fail('技能已经开启');
     if (u.skillOpened === s.players[u.owner].ownTurn) fail('同一己方回合只能开启一次技能');
@@ -378,6 +424,7 @@ function perform(s: GameState, a: Action) {
   }
   if (a.type === 'closeSkill') { if (!u.skillActive) fail('技能未开启'); closeSkill(u); log(s, `${d.name}关闭技能，进入回转`); return; }
   if (a.type === 'move') {
+    // 移动：先扣费再判定神经损伤——神经状态下费用照付但移动无效
     validateDirection(a.direction); validateMove(s, u, a.position);
     if (samePosition(u, a.position) && a.direction === u.direction) fail('请选择不同位置或朝向');
     const cost = moveCost(s, u, a.position); pay(s, u.owner, cost); u.moved = true; u.smoke = false;
@@ -388,11 +435,13 @@ function perform(s: GameState, a: Action) {
   const t = s.units[a.target]; if (!t) fail('目标不在场上');
   if (!inRange(s, u, t)) fail('目标不在当前朝向范围内');
   if (a.type === 'heal') {
+    // 治疗：只对己方、目标未满生命，实际恢复量不超出最大生命
     if (d.profession !== '医疗' || t.owner !== u.owner) fail('医疗只能治疗己方干员');
     if (t.hp >= definition(s, t.id).hp!) fail('目标已是满生命');
     const amount = Math.min(definition(s, t.id).hp! - t.hp, d.power! + (u.skillActive ? d.skill!.bonus : 0));
     consumeAttack(s, u, true); t.hp += amount; log(s, `${d.name}治疗${definition(s, t.id).name} +${amount}`);
   } else {
+    // 主动攻击：医疗不能攻击、不能打己方与烟雾目标；近战只能打队首；若对方也够得着你则受一次反击
     if (d.profession === '医疗') fail('医疗干员不能攻击');
     if (t.owner === u.owner) fail('不能攻击己方干员');
     if (t.smoke) fail('目标处于烟雾，不能被主动指定');
@@ -416,14 +465,17 @@ function perform(s: GameState, a: Action) {
 }
 function resolveClashAfterCasualty(s: GameState, ...previous: Unit[]) {
   // An ordinary attack must not create an extra clash if neither unit left.
+  // 只在攻击造成减员的格子补一次交战结算，避免无谓的额外互殴
   const positions = new Map(previous.filter(u => !s.units[u.id]).map(u => [`${u.r}:${u.c}`, u]));
   for (const p of positions.values()) resolveClash(s, p);
 }
+// 对外唯一动作接口：克隆状态执行，成功返回新状态，失败返回错误消息（原状态永不污染）
 export function applyAction(state: GameState, action: Action): Outcome {
   const s = structuredClone(state);
   try { perform(s, action); s.revision++; return { ok: true, state: s }; }
   catch (e) { return { ok: false, error: e instanceof Error ? e.message : '操作失败' }; }
 }
+// 玩家视图：剥离卡池随机源，只暴露该玩家可见的牌（己方手牌、双方弃牌/移除/场上），防作弊
 export function getView(s: GameState, viewer: Side): PlayerView {
   const { cards: _cards, players: _players, rng: _rng, ...state } = structuredClone(s);
   const visibleCards: Record<string, CardInstance> = {};
@@ -434,6 +486,7 @@ export function getView(s: GameState, viewer: Side): PlayerView {
   })) as PlayerView['players'];
   return { state, players, visibleCards };
 }
+// 存档校验：版本、字段范围、卡牌守恒（双方共 60 张不重不漏）、构筑合法性逐项检查
 export function assertState(s: GameState) {
   if (!s || s.schema !== 1 || s.rulesVersion !== RULES_VERSION || s.contentVersion !== CONTENT_VERSION ||
     !s.players || !s.cards || !s.units || !sides.includes(s.active) || !['local', 'demo'].includes(s.mode) ||
@@ -478,6 +531,7 @@ export function assertState(s: GameState) {
     !Number.isInteger(c.cost) || c.cost < 0 || c.cost > s.players[c.owner]?.cap || !found.has(id)) fail('存档卡牌费用不合法');
   for (const side of sides) if (validateDeck(Object.values(s.cards).filter(c => c.owner === side).map(c => c.definition))) fail('存档构筑不合法');
 }
+// 从 JSON 文本恢复对局，校验不过直接抛错
 export function loadGame(text: string): GameState {
   const s = JSON.parse(text) as GameState; assertState(s); return s;
 }

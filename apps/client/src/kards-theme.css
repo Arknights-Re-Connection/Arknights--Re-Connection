@@ -258,6 +258,8 @@ button:focus-visible, input:focus-visible { outline-color: #f0ce72; }
 }
 .hand-card.command { border-color: #8c805d; background: url('/textures/paper.svg'); }
 .hand-card:hover:not(:disabled), .hand-card.selected { transform: translateY(-20px) rotate(0) scale(1.14); z-index: 10; border-color: #e2c365; box-shadow: 0 6px 18px #000a, 0 0 0 1px #ead495; background: url('/textures/paper.svg'); filter: none; }
+.hand-cards.locked .hand-card:hover:not(:disabled):not(.selected) { transform: translateY(var(--fan-lift)) rotate(var(--fan)); z-index: auto; border-color: #646d4d; box-shadow: 1px 4px 5px #000b, inset 0 0 0 1px #f7ecc66b; }
+.hand-cards.locked .hand-card.command:hover:not(:disabled):not(.selected) { border-color: #8c805d; }
 .card-top { height: 12px; align-items: center; justify-content: flex-end; color: #546344; border-bottom: 1px solid #8e9574; margin-bottom: 3px; }
 .card-top > span { font-size: 7px; letter-spacing: 1px; }
 .card-top > b {
@@ -462,6 +464,7 @@ button:focus-visible, input:focus-visible { outline-color: #f0ce72; }
   .hand-cards { overflow-x: auto; overflow-y: hidden; gap: 7px; justify-content: flex-start; padding: 10px 5px; height: 140px; }
   .hand-card { flex: 0 0 95px; margin: 0; transform: none; }
   .hand-card:hover:not(:disabled), .hand-card.selected { transform: translateY(-5px); }
+  .hand-cards.locked .hand-card:hover:not(:disabled):not(.selected) { transform: none; }
   .resource-number strong { font-size: 33px; }
   .hero-visual { height: 430px; min-height: 400px; margin-top: 20px; }
   .war-dossier { height: 315px; }
