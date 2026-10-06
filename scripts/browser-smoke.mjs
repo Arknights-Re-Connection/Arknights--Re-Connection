@@ -4,12 +4,16 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 
 const base = process.env.PROTOTYPE_URL || 'http://127.0.0.1:5173';
 await mkdir('artifacts', { recursive: true });
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({
+  headless: true,
+  ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}),
+});
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true });
 const page = await context.newPage();
 const errors = [], checks = [];
 page.on('pageerror', e => errors.push(e.message));
-page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+page.on('console', m => { if (m.type() === 'error') errors.push(`${m.text()} (${m.location().url})`); });
+page.on('response', response => { if (response.status() >= 400) errors.push(`HTTP ${response.status()} ${response.url()}`); });
 let exportIndex = 0;
 async function check(name, work) { await work(); checks.push(name); console.log(`PASS ${name}`); }
 async function cell(r, c, viewer = 'blue') {
@@ -75,6 +79,35 @@ try {
     }
     await page.setViewportSize({ width: 1440, height: 1000 }); await page.waitForTimeout(120);
     await page.screenshot({ path: 'artifacts/demo.png' });
+  });
+  await check('手机、平板、4:3 与 2:1 视口保持地图和手牌可用', async () => {
+    for (const [width, height, minimumBoard] of [
+      [390, 844, 320], [360, 800, 300], [844, 422, 240],
+      [800, 600, 350], [1024, 768, 350], [1280, 640, 250],
+    ]) {
+      await page.setViewportSize({ width, height });
+      await page.waitForTimeout(120);
+      const layout = await page.evaluate(() => {
+        const canvas = document.querySelector('canvas');
+        const board = canvas?.getBoundingClientRect();
+        const handLabel = document.querySelector('.hand-label');
+        const cards = document.querySelectorAll('.hand-card');
+        return {
+          pageWidth: document.documentElement.scrollWidth,
+          board: board ? { width: board.width, height: board.height, left: board.left, right: board.right } : null,
+          handFont: handLabel ? Number.parseFloat(getComputedStyle(handLabel).fontSize) : 0,
+          cards: cards.length,
+        };
+      });
+      assert.ok(layout.board, `找不到 ${width}×${height} 视口的棋盘`);
+      assert.ok(layout.board.width >= minimumBoard, `${width}×${height} 棋盘过小: ${layout.board.width}px`);
+      assert.ok(layout.board.left >= 0 && layout.board.right <= width, `${width}×${height} 棋盘超出屏幕`);
+      assert.ok(layout.pageWidth <= width, `${width}×${height} 页面出现横向溢出: ${layout.pageWidth}px`);
+      assert.ok(layout.handFont >= 10, `${width}×${height} 手牌字号过小: ${layout.handFont}px`);
+      assert.ok(layout.cards > 0, `${width}×${height} 没有可操作的手牌`);
+      await page.screenshot({ path: `artifacts/responsive-${width}x${height}.png` });
+    }
+    await page.setViewportSize({ width: 1440, height: 1000 });
   });
   await check('非法部署禁止确认，合法部署实际扣费', async () => {
     await page.getByTestId('card-v3').click(); await cell(5, 5);
@@ -167,6 +200,69 @@ try {
     await page.getByRole('dialog', { name: /蓝方胜利/ }).waitFor();
     assert.match(await page.getByRole('dialog').innerText(), /20 回合/);
     await page.screenshot({ path: 'artifacts/game-over.png' });
+  });
+  await check('卡牌悬停锁定、手持拖拽回位与两种部署选向', async () => {
+    await page.goto(`${base}/?demo`);
+    await page.locator('canvas').waitFor();
+    const operatorCard = page.getByTestId('card-v3');
+    const handCount = await page.locator('.friendly-rail .hand-card').count();
+    await operatorCard.hover();
+    assert.equal(await page.locator('.detail-title h2').innerText(), '引路');
+    await page.locator('.battle-heading').hover();
+    assert.equal(await page.locator('.detail-empty').count(), 1);
+    await operatorCard.click();
+    await page.locator('.friendly-rail .hand-card').nth(1).hover();
+    assert.equal(await page.locator('.detail-title h2').innerText(), '引路');
+    assert.equal(await page.locator('.friendly-rail .hand-card').nth(1).evaluate(el => el.classList.contains('selected')), false);
+    await page.keyboard.press('Escape');
+
+    const handLabel = await page.locator('.hand-label').boundingBox();
+    const cardBox = await operatorCard.boundingBox();
+    assert.ok(handLabel && cardBox);
+    const neighborBefore = await page.locator('.friendly-rail .hand-card').nth(1).boundingBox();
+    assert.ok(neighborBefore);
+    await page.mouse.move(cardBox.x + cardBox.width / 2, cardBox.y + cardBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(handLabel.x + handLabel.width / 2, handLabel.y + handLabel.height / 2, { steps: 8 });
+    await page.locator('.hand-card.drag-card-proxy').waitFor();
+    const dragOpacity = await page.locator('.hand-card.drag-card-proxy').evaluate(el => Number.parseFloat(getComputedStyle(el).opacity));
+    assert.ok(dragOpacity <= .7, `拖动卡牌应保持半透明，实际 opacity=${dragOpacity}`);
+    const neighborDuring = await page.locator('.friendly-rail .hand-card').nth(1).boundingBox();
+    assert.ok(neighborDuring && Math.abs(neighborDuring.x - neighborBefore.x) > 1);
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+    assert.equal(await page.locator('.friendly-rail .hand-card').count(), handCount);
+    assert.equal(await page.locator('.hand-card.drag-card-proxy').count(), 0);
+
+    const canvas = await page.locator('canvas').boundingBox();
+    assert.ok(canvas);
+    await page.mouse.move(cardBox.x + cardBox.width / 2, cardBox.y + cardBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(canvas.x + canvas.width * .5, canvas.y + canvas.height * .82, { steps: 8 });
+    await page.mouse.up();
+    await page.locator('.board-canvas.aiming').waitFor();
+    const point = (r, c) => ({
+      x: canvas.x + (50 + (c - .5) * 80) / 820 * canvas.width,
+      y: canvas.y + (50 + (r - .5) * 80) / 820 * canvas.height,
+    });
+    const placement = point(8, 5);
+    await page.mouse.move(placement.x, placement.y);
+    await page.mouse.down();
+    await page.mouse.move(placement.x, placement.y - 44, { steps: 7 });
+    await page.mouse.up();
+    await page.waitForFunction(() => !document.querySelector('.board-canvas.aiming'));
+    assert.equal(await page.locator('.friendly-rail .hand-card').count(), handCount - 1);
+
+    await page.getByTestId('card-d3').click();
+    const clickPlacement = point(9, 3);
+    await page.mouse.click(clickPlacement.x, clickPlacement.y);
+    await page.locator('.direction-picker button').nth(1).click();
+    await page.getByRole('button', { name: '确认执行', exact: true }).click();
+    const uxState = await state();
+    const dragDeployed = card(uxState, 'blue', 'v3');
+    const clickDeployed = card(uxState, 'blue', 'd3');
+    assert.equal(uxState.units[dragDeployed.id].direction, 0);
+    assert.equal(uxState.units[clickDeployed.id].direction, 1);
   });
   assert.deepEqual(errors, [], `浏览器错误：${errors.join('\n')}`);
   await writeFile('artifacts/browser-results.json', JSON.stringify({ date: new Date().toISOString(), base, checks, browserErrors: errors }, null, 2));
