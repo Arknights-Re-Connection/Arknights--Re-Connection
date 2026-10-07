@@ -329,18 +329,24 @@ button:focus-visible, input:focus-visible { outline-color: #f0ce72; }
 .toast { position: fixed; pointer-events: none; background: #2c3627; border: 1px solid #9b956a; color: #e3d8b6; font-size: 11px; }
 
 /* The main menu is an operations folder and a physical three-card spread. */
-.home { min-height: calc(100dvh - 56px); padding: 60px 70px 26px; max-width: 1480px; grid-template-columns: .9fr 1.1fr; gap: 50px; }
-.hero-copy .eyebrow { color: #d5c193; font-size: 10px; }
-.hero-copy h1 { color: #efe3c4; font-size: clamp(56px, 6vw, 88px); line-height: 1.1; margin: 26px 0; letter-spacing: 8px; font-weight: 800; text-shadow: 0 3px 12px #0007; }
-.hero-copy h1 > span { display: block; font-size: .33em; font-weight: 450; color: #c8b790; letter-spacing: 14px; margin-top: 18px; }
-.hero-copy > p { color: #c0b79b; font-size: 13px; }
-.hero-actions { gap: 10px; margin-top: 28px; }
-.hero-actions .primary, .hero-actions .secondary { min-width: 175px; height: 50px; font-size: 12px; }
-.hero-links button { color: #c4b890; }
-.prototype-note { border-color: #ae936640; gap: 13px; margin-top: 35px; padding-top: 18px; }
+.home { min-height: calc(100dvh - 56px); padding: 60px 70px 26px; max-width: 1480px; grid-template-columns: 1fr 1.15fr; gap: 56px; align-items: center; }
+.hero-copy .eyebrow { color: #d5c193; font-size: 10px; letter-spacing: 2px; display: block; margin-bottom: 10px; }
+.hero-copy h1 { color: #efe3c4; font-size: clamp(52px, 5.5vw, 84px); line-height: 1.05; margin: 0 0 16px; letter-spacing: 6px; font-weight: 800; text-shadow: 0 3px 12px #0007; background: linear-gradient(135deg, #efe3c4 0%, #d5c193 50%, #c8b790 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+.hero-copy h1 > span { display: block; font-size: .33em; font-weight: 450; color: #c8b790; letter-spacing: 14px; margin-top: 14px; -webkit-text-fill-color: #c8b790; }
+.hero-copy > p { color: #c0b79b; font-size: 14px; line-height: 1.6; margin-bottom: 24px; }
+.hero-actions { gap: 14px; margin-top: 0; margin-bottom: 24px; }
+.hero-actions .primary, .hero-actions .secondary { min-width: 180px; height: 52px; font-size: 13px; font-weight: 600; letter-spacing: 1px; position: relative; overflow: hidden; }
+.hero-actions .primary::after, .hero-actions .secondary::after { content: ''; position: absolute; inset: 0; background: linear-gradient(135deg, rgba(255,255,255,.12) 0%, transparent 50%); opacity: 0; transition: opacity .25s ease; }
+.hero-actions .primary:hover::after, .hero-actions .secondary:hover::after { opacity: 1; }
+.hero-actions .primary { box-shadow: 0 4px 16px #e4cc8730, inset 0 0 0 2px #51472440; }
+.hero-actions .secondary { box-shadow: 0 4px 16px #0004, inset 0 0 0 2px #151b164d; }
+.hero-links { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
+.hero-links button { color: #c4b890; font-size: 12px; padding: 10px 16px; background: #252b2380; border: 1px solid #777c6040; border-radius: 4px; cursor: pointer; transition: all .2s ease; }
+.hero-links button:hover { background: #292d25; border-color: #a09870; color: #efe3c4; transform: translateX(4px); }
+.prototype-note { border-color: #ae936640; gap: 13px; margin-top: 30px; padding-top: 20px; }
 .prototype-note > span { border-color: #aa936353; color: #c3af7c; font-size: 8px; letter-spacing: .7px; }
-.prototype-note p { color: #a69f81; font-size: 10px; }
-.hero-visual { min-height: 480px; aspect-ratio: auto; height: 580px; background: none; }
+.prototype-note p { color: #a69f81; font-size: 10px; line-height: 1.5; }
+.hero-visual { min-height: 480px; aspect-ratio: auto; height: 580px; background: none; position: relative; }
 .war-dossier {
   position: absolute;
   top: 18px;
@@ -485,14 +491,35 @@ button:focus-visible, input:focus-visible { outline-color: #f0ce72; }
   .cover-card > span > b { width: 27px; height: 27px; left: -13px; top: -10px; font-size: 20px; }
   .catalog-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
+@media (max-width: 768px) {
+  .home { padding: 32px 18px 20px; gap: 28px; grid-template-columns: 1fr; }
+  .hero-copy h1 { font-size: 48px; letter-spacing: 4px; margin-bottom: 12px; }
+  .hero-copy h1 > span { font-size: 16px; letter-spacing: 8px; }
+  .hero-copy > p { font-size: 13px; }
+  .hero-actions { flex-direction: column; gap: 10px; }
+  .hero-actions .primary, .hero-actions .secondary { min-width: 100%; width: 100%; }
+  .hero-links { flex-direction: column; gap: 8px; }
+  .hero-links button { font-size: 11px; padding: 8px 12px; }
+  .hero-visual { height: 380px; min-height: 340px; margin-top: 0; }
+  .war-dossier { height: 280px; padding: 18px; }
+  .war-dossier .hero-grid { height: 180px; }
+  .cover-card { width: 90px; height: 160px; }
+  .cover-card .card-art.large { height: 78px; }
+  .cover-card h3 { font-size: 13px; }
+  .cover-card > div > b { width: 20px; height: 20px; font-size: 16px; }
+  .cover-card > span > b { width: 22px; height: 22px; font-size: 16px; }
+  .home-bottom { font-size: 8px; gap: 12px; }
+}
 @media (max-width: 650px) {
   .topbar nav button { font-size: 9px; }
   .brand > span { font-size: 13px; }
   .brand small { font-size: 7px; }
-  .home { padding: 40px 22px 20px; }
-  .hero-copy h1 { font-size: 61px; letter-spacing: 5px; }
-  .hero-copy h1 > span { font-size: 21px; }
-  .hero-visual { max-width: 410px; margin: 30px auto 10px; }
+  .home { padding: 28px 14px 16px; }
+  .hero-copy h1 { font-size: 42px; letter-spacing: 3px; margin-bottom: 10px; }
+  .hero-copy h1 > span { font-size: 14px; letter-spacing: 6px; }
+  .hero-copy > p { font-size: 12px; }
+  .hero-actions .primary, .hero-actions .secondary { min-width: 100%; height: 46px; font-size: 12px; }
+  .hero-visual { max-width: 410px; margin: 20px auto 8px; height: 320px; min-height: 280px; }
   .cover-card { width: 118px; }
   .battle { padding: 10px; }
   .battle-heading h1 { font-size: 14px; }

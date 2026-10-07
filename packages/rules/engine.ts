@@ -95,7 +95,7 @@ export function moveCost(s: GameState, u: Unit, p: Position) {
 export function actionCost(s: GameState, u: Unit, healing = false) {
   const d = definition(s, u.id);
   const base = healing || d.mode === 'ranged' ? 2 : 1;
-  const cost = u.skillActive ? d.skill!.type === 'ammo' ? base + u.skillK : base * 2 ** u.skillK : base;
+  const cost = u.skillActive && d.skill ? d.skill.type === 'ammo' ? base + u.skillK : base * 2 ** u.skillK : base;
   return cost + (healing ? 0 : coldCost(u));
 }
 // 扣指挥点，不足则失败
@@ -166,7 +166,7 @@ function checkScores(s: GameState) {
 export function damageValue(s: GameState, from: Unit, to: Unit, rear = false) {
   const a = definition(s, from.id), b = definition(s, to.id);
   if (a.profession === '医疗' || frozen(s, from)) return 0;
-  const power = a.power! + (from.skillActive ? a.skill!.bonus : 0);
+  const power = a.power! + (from.skillActive && a.skill ? a.skill.bonus : 0);
   const defense = a.damage === 'physical' ? b.armor! : a.damage === 'arts' ? b.resist! : 0;
   return Math.max(0, Math.max(0, power - defense) + (a.damage === 'arts' && to.burnUntil >= s.turn ? 1 : 0) - (rear ? 1 : 0));
 }
@@ -214,7 +214,7 @@ function beginTurn(s: GameState) {
   for (const u of Object.values(s.units)) {
     const d = definition(s, u.id);
     if (u.owner === s.active) { u.moved = false; u.attacked = false; }
-    if (!u.skillActive) u.charge = Math.min(d.skill!.turns + u.extraCharge, u.charge + 1);
+    if (!u.skillActive && d.skill) u.charge = Math.min(d.skill.turns + u.extraCharge, u.charge + 1);
   }
   log(s, `${sideName(s.active)}回合开始，指挥点 +8（${p.cp}/${p.cap}）`);
   draw(s, s.active, 2);
@@ -261,7 +261,7 @@ function setDemo(s: GameState) {
     s.players[side].deck = s.players[side].deck.filter(x => x !== id);
     s.players[side].hand = s.players[side].hand.filter(x => x !== id);
     s.cards[id].zone = 'board'; s.units[id] = newUnit(s, id, position, side === 'blue' ? 0 : 2);
-    s.units[id].deployed = 1; s.units[id].charge = catalog[def].skill!.turns;
+    s.units[id].deployed = 1; s.units[id].charge = catalog[def].skill?.turns ?? 0;
   }
   const blueGuard = Object.values(s.units).find(u => u.owner === 'blue' && s.cards[u.id].definition === 'g1');
   if (blueGuard) blueGuard.hp = 17;
@@ -310,9 +310,9 @@ function consumeAttack(s: GameState, u: Unit, healing: boolean) {
   readyToAct(s, u);
   if (!u.skillActive && u.attacked) fail(healing ? '本回合已经治疗' : '本回合已经攻击');
   const d = definition(s, u.id);
-  if (u.skillActive && d.skill!.type === 'ammo' && u.ammo <= 0) fail('弹药不足');
+  if (u.skillActive && d.skill && d.skill.type === 'ammo' && u.ammo <= 0) fail('弹药不足');
   pay(s, u.owner, actionCost(s, u, healing)); u.attacked = true;
-  if (u.skillActive) { u.skillK++; if (d.skill!.type === 'ammo') u.ammo--; }
+  if (u.skillActive && d.skill) { u.skillK++; if (d.skill.type === 'ammo') u.ammo--; }
 }
 // 施加元素伤害：每次 1 点真实伤害；累计满 9 层触发损伤，之后两回合免疫不再累计
 export function applyElement(s: GameState, id: string, element: Element, amount = 1) {
@@ -327,7 +327,8 @@ export function applyElement(s: GameState, id: string, element: Element, amount 
     const keys: Element[] = ['burn', 'nerve', 'decay'];
     const highest = Math.max(...keys.map(k => u.elements[k]));
     const chosen = keys.filter(k => u.elements[k] === highest).sort((a, b) => u.lastElement[b] - u.lastElement[a])[0];
-    const wasReady = u.charge >= definition(s, id).skill!.turns + u.extraCharge;
+    const skillDef = definition(s, id).skill;
+    const wasReady = !!skillDef && u.charge >= skillDef.turns + u.extraCharge;
     u.elements = { burn: 0, nerve: 0, decay: 0 }; u.lastElement = { burn: 0, nerve: 0, decay: 0 }; u.immuneUntil = s.turn + 2;
     if (chosen === 'burn') { u.hp -= u.burnUntil >= s.turn ? 3 : 4; u.burnUntil = s.turn + 2; }
     if (chosen === 'nerve') u.nerve = true;
@@ -386,7 +387,7 @@ function perform(s: GameState, a: Action) {
       if (u.frozenUntil === s.turn) u.frozenUntil = 0;
       if (u.burnUntil === s.turn) u.burnUntil = 0;
       if (u.immuneUntil === s.turn) u.immuneUntil = 0;
-      if (u.owner === s.active && u.skillActive && definition(s, u.id).skill!.type === 'burst') closeSkill(u);
+      if (u.owner === s.active && u.skillActive && definition(s, u.id).skill?.type === 'burst') closeSkill(u);
     }
     if (s.turn === 40) {
       const b = s.players.blue, r = s.players.red;
@@ -413,14 +414,16 @@ function perform(s: GameState, a: Action) {
   const u = requireUnit(s, a.unit), d = definition(s, u.id);
   if (a.type === 'retreat') { const p = { r: u.r, c: u.c }; removeUnit(s, u.id, 'retreat'); resolveClash(s, p); return; }
   if (a.type === 'skill') {
-    // 开启技能：需充能完成，且同一己方回合只能开一次
+    // 开启技能：需充能完成，且同一己方回合只能开一次；部署当回合休整、无技能卡均不可开
+    if (!d.skill) fail('该干员没有技能');
+    if (u.deployed === s.turn) fail('部署当回合不能开启技能');
     if (frozen(s, u)) fail('冻结期间不能开启技能');
     if (u.skillActive) fail('技能已经开启');
     if (u.skillOpened === s.players[u.owner].ownTurn) fail('同一己方回合只能开启一次技能');
     if (u.lockUntilOwnTurn > s.players[u.owner].ownTurn) fail('技能被封锁至下个己方回合');
-    if (u.charge < d.skill!.turns + u.extraCharge) fail('技能尚未充能完成');
-    u.skillActive = true; u.charge = 0; u.skillK = 0; u.ammo = d.skill!.ammo ?? 0; u.skillOpened = s.players[u.owner].ownTurn;
-    log(s, `${d.name}开启「${d.skill!.name}」，攻击/治疗次数放开`); return;
+    if (u.charge < d.skill.turns + u.extraCharge) fail('技能尚未充能完成');
+    u.skillActive = true; u.charge = 0; u.skillK = 0; u.ammo = d.skill.ammo ?? 0; u.skillOpened = s.players[u.owner].ownTurn;
+    log(s, `${d.name}开启「${d.skill.name}」，攻击/治疗次数放开`); return;
   }
   if (a.type === 'closeSkill') { if (!u.skillActive) fail('技能未开启'); closeSkill(u); log(s, `${d.name}关闭技能，进入回转`); return; }
   if (a.type === 'move') {
@@ -438,7 +441,7 @@ function perform(s: GameState, a: Action) {
     // 治疗：只对己方、目标未满生命，实际恢复量不超出最大生命
     if (d.profession !== '医疗' || t.owner !== u.owner) fail('医疗只能治疗己方干员');
     if (t.hp >= definition(s, t.id).hp!) fail('目标已是满生命');
-    const amount = Math.min(definition(s, t.id).hp! - t.hp, d.power! + (u.skillActive ? d.skill!.bonus : 0));
+    const amount = Math.min(definition(s, t.id).hp! - t.hp, d.power! + (u.skillActive && d.skill ? d.skill.bonus : 0));
     consumeAttack(s, u, true); t.hp += amount; log(s, `${d.name}治疗${definition(s, t.id).name} +${amount}`);
   } else {
     // 主动攻击：医疗不能攻击、不能打己方与烟雾目标；近战只能打队首；若对方也够得着你则受一次反击
@@ -460,7 +463,7 @@ function perform(s: GameState, a: Action) {
       resolveClashAfterCasualty(s, t, u);
     }
   }
-  if (s.units[u.id] && u.skillActive && d.skill!.type === 'ammo' && u.ammo <= 0) closeSkill(u);
+  if (s.units[u.id] && u.skillActive && d.skill?.type === 'ammo' && u.ammo <= 0) closeSkill(u);
   checkScores(s);
 }
 function resolveClashAfterCasualty(s: GameState, ...previous: Unit[]) {

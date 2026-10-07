@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { catalog, defaultDeck, validateDeck } from '../content';
-import { actionCost, applyAction, applyElement, assertState, attackRange, canEnter, capacity, createGame, deploymentArea, getView, legalMoves, loadGame, newUnit, rotatedOffset } from './engine';
+import { actionCost, applyAction, applyElement, assertState, attackRange, canEnter, capacity, createGame, damageValue, deploymentArea, frozen, getView, legalMoves, loadGame, moveCost, newUnit, rotatedOffset } from './engine';
 import type { Action, GameState, Side, Unit } from './types';
 
 function step(s: GameState, a: Action): GameState {
   const result = applyAction(s, a);
   if (!result.ok) throw new Error(result.error);
   assertState(result.state);
+  return result.state;
+}
+function ok(s: GameState, a: Action): GameState {
+  const result = applyAction(s, a);
+  if (!result.ok) throw new Error(result.error);
   return result.state;
 }
 function fresh() { return createGame('local', 42); }
@@ -126,8 +131,10 @@ describe('部署、移动、准入与抵达', () => {
   it('部署休整不能被技能绕过，非法动作不改变源状态', () => {
     let s = fresh(); const card = hand(s, 'blue', 'v1');
     s = step(s, { type: 'deploy', card: card.id, position: { r: 8, c: 5 }, direction: 0 });
-    s.units[card.id].charge = 3; s = step(s, { type: 'skill', unit: card.id });
-    const before = structuredClone(s); expect(applyAction(s, { type: 'move', unit: card.id, position: { r: 7, c: 5 }, direction: 0 }).ok).toBe(false);
+    s.units[card.id].charge = 3;
+    const before = structuredClone(s);
+    expect(applyAction(s, { type: 'skill', unit: card.id }).ok).toBe(false);
+    expect(applyAction(s, { type: 'move', unit: card.id, position: { r: 7, c: 5 }, direction: 0 }).ok).toBe(false);
     expect(s).toEqual(before);
   });
   it('先锋相邻免费，两格 3 点，不跨过中间阻挡', () => {
@@ -236,5 +243,121 @@ describe('主动战斗、治疗、技能与元素', () => {
     s = step(s, { type: 'end' }); expect(s.units[b.id].frozenUntil).toBe(3);
     s = step(s, { type: 'end' }); expect(s.turn).toBe(3);
     s = step(s, { type: 'end' }); expect(s.units[b.id].frozenUntil).toBe(0);
+  });
+});
+
+describe('补测：资源、洗牌与生命周期（A03/A10/A11/A12/B02）', () => {
+  it('A03 指挥点余额封顶不溢出，存档不保存溢出值', () => {
+    let s = fresh(); s.players.blue.cp = 99; s.players.blue.cap = 100;
+    s = step(s, { type: 'end' }); s = step(s, { type: 'end' }); // 蓝方回合开始 +8，封顶 100
+    expect(s.players.blue.cp).toBe(100); expect(s.players.blue.cap).toBe(100);
+    assertState(s); expect(loadGame(JSON.stringify(s))).toEqual(s);
+  });
+  it('A10 抽牌堆剩1弃牌堆4抽2：先抽原堆剩余再洗回弃牌堆', () => {
+    let s = fresh();
+    const deck = s.players.blue.deck, keep = deck[0], toDiscard = deck.slice(1, 5), rest = deck.slice(5);
+    s.players.blue.deck = [keep]; s.players.blue.discard = toDiscard; s.players.blue.hand = [...s.players.blue.hand, ...rest];
+    s.cards[keep].zone = 'deck';
+    toDiscard.forEach(id => { s.cards[id].zone = 'discard'; });
+    rest.forEach(id => { s.cards[id].zone = 'hand'; });
+    const r1 = ok(s, { type: 'end' });
+    const r2 = ok(r1, { type: 'end' });
+    const st = r2;
+    expect(st.players.blue.hand.slice(-2)[0]).toBe(keep); // 第一张来自原抽牌堆剩余
+    expect(st.players.blue.deck).toHaveLength(3); // 洗回 4 张抽走 1 张
+    expect(st.players.blue.discard).toHaveLength(0);
+  });
+  it('A11 抽牌堆与弃牌堆均为空时不抽牌也不判负', () => {
+    const s = fresh(); s.players.blue.deck = []; s.players.blue.discard = [];
+    const r1 = ok(s, { type: 'end' });
+    const r2 = ok(r1, { type: 'end' });
+    expect(r2.players.blue.hand).toHaveLength(5);
+    expect(r2.winner).toBeUndefined(); expect(r2.phase).toBe('action');
+  });
+  it('A12 撤退洗回后重新部署获得全新生命周期', () => {
+    let s = fresh(); s.players.blue.cp = 100;
+    const card = hand(s, 'blue', 'v1');
+    s = step(s, { type: 'deploy', card: card.id, position: { r: 8, c: 5 }, direction: 0 });
+    s.units[card.id].hp = 5; s.units[card.id].charge = 3; s.units[card.id].cold = 1; s.units[card.id].smoke = true;
+    s = step(s, { type: 'retreat', unit: card.id });
+    expect(s.cards[card.id].zone).toBe('discard'); expect(s.cards[card.id].cost).toBe(8);
+    s.players.blue.deck = [...s.players.blue.deck, ...s.players.blue.discard.splice(0)];
+    s.players.blue.deck.forEach(id => { s.cards[id].zone = 'deck'; });
+    const idx = s.players.blue.deck.indexOf(card.id); s.players.blue.deck.splice(idx, 1);
+    s.players.blue.hand.push(card.id); s.cards[card.id].zone = 'hand';
+    s = step(s, { type: 'deploy', card: card.id, position: { r: 8, c: 4 }, direction: 0 });
+    const u = s.units[card.id];
+    expect(u.hp).toBe(18); expect(u.charge).toBe(0); expect(u.skillActive).toBe(false);
+    expect(u.deployed).toBe(s.turn); expect(u.skillOpened).toBe(-1);
+    expect(u.cold).toBe(0); expect(u.smoke).toBe(false); expect(u.extraCharge).toBe(0);
+  });
+  it('B02 无效部署不扣费也不占用部署次数', () => {
+    let s = fresh(); const card = hand(s, 'blue', 'v1'); const pricey = hand(s, 'blue', 'd2');
+    const before = structuredClone(s);
+    expect(applyAction(s, { type: 'deploy', card: card.id, position: { r: 5, c: 5 }, direction: 0 }).ok).toBe(false); // 非部署区
+    expect(s.players.blue.cp).toBe(13); expect(s.players.blue.deployed).toBe(0); expect(s.cards[card.id].zone).toBe('hand');
+    expect(s).toEqual(before);
+    s.players.blue.cp = 4;
+    expect(applyAction(s, { type: 'deploy', card: pricey.id, position: { r: 8, c: 5 }, direction: 0 }).ok).toBe(false); // 费用不足
+    expect(s.players.blue.cp).toBe(4); expect(s.players.blue.deployed).toBe(0); expect(s.cards[pricey.id].zone).toBe('hand');
+  });
+});
+
+describe('补测：战斗、移动与元素细则（B12/B14/C01/C08/C13/C21）', () => {
+  it('B12 重装相邻移动基准1，寒冷2层费用为4', () => {
+    const s = fresh(); const u = place(s, 'blue', 'd1', 8, 5);
+    expect(moveCost(s, u, { r: 7, c: 5 })).toBe(1);
+    u.cold = 2; expect(moveCost(s, u, { r: 7, c: 5 })).toBe(4);
+    u.cold = 1; expect(moveCost(s, u, { r: 7, c: 5 })).toBe(2);
+  });
+  it('B14 队首致命伤后排不承受溢出伤害', () => {
+    const s = fresh(); const front = place(s, 'red', 'v1', 3, 5, 3); const rear = place(s, 'red', 'a3', 3, 5, 14);
+    const a = place(s, 'blue', 'g1', 4, 5);
+    const next = step(s, { type: 'attack', unit: a.id, target: front.id });
+    expect(next.units[front.id]).toBeUndefined(); // 队首被击败
+    expect(next.units[rear.id].hp).toBe(14); // 后排不承受溢出
+    expect(next.players.red.discard).toContain(front.id);
+  });
+  it('C01 物伤8攻物抗10伤害0不治疗', () => {
+    (catalog as Record<string, unknown>)['test-armor10'] = { id: 'test-armor10', name: '铁壁测试', kind: 'operator', profession: '重装', cost: 6, hp: 40, power: 0, damage: 'physical', armor: 10, resist: 5, block: 3, mode: 'melee', range: [[0, 0], [-1, 0]], skill: { name: 't', turns: 4, type: 'burst', bonus: 0 }, description: '' };
+    try {
+      const s = fresh(); const atk = place(s, 'blue', 's1', 4, 5); // power 8 物伤近战
+      const defCard = take(s, 'red', 'd2'); defCard.definition = 'test-armor10'; defCard.zone = 'board';
+      const def = newUnit(s, defCard.id, { r: 3, c: 5 }, 2); def.deployed = 0; s.units[defCard.id] = def;
+      const next = step(s, { type: 'attack', unit: atk.id, target: defCard.id });
+      expect(next.units[defCard.id].hp).toBe(40); // 伤害 0，不治疗
+      expect(next.units[atk.id].hp).toBe(19); // 反击也为 0
+      expect(next.players.blue.cp).toBe(12);
+    } finally { delete (catalog as Record<string, unknown>)['test-armor10']; }
+  });
+  it('C08 回转N=4：第1回合部署不追补，之后4个全局回合各+1', () => {
+    let s = fresh(); s.players.blue.cp = 100;
+    const card = hand(s, 'blue', 'g1'); // 技能回转 4
+    s = step(s, { type: 'deploy', card: card.id, position: { r: 8, c: 5 }, direction: 0 });
+    expect(s.units[card.id].charge).toBe(0); // 部署当回合不追补
+    for (let i = 0; i < 4; i++) s = step(s, { type: 'end' });
+    expect(s.turn).toBe(5); expect(s.units[card.id].charge).toBe(4);
+    expect(applyAction(s, { type: 'skill', unit: card.id }).ok).toBe(true);
+  });
+  it('C13 寒冷二层再受一层清零冻结，冻结期免疫累计', () => {
+    let s = fresh(); s.players.blue.cp = 100; const target = place(s, 'red', 'd1', 5, 5); target.cold = 2;
+    const cold = hand(s, 'blue', 'cold');
+    s = step(s, { type: 'command', card: cold.id, target: target.id });
+    expect(s.units[target.id].cold).toBe(0); expect(s.units[target.id].frozenUntil).toBe(3);
+    expect(frozen(s, s.units[target.id])).toBe(true); expect(capacity(s, s.units[target.id], 'blue')).toBe(3);
+    const cold2 = hand(s, 'blue', 'cold'); // 同实例从弃牌堆回手（费用 +15）
+    const after = step(s, { type: 'command', card: cold2.id, target: target.id });
+    expect(after.units[target.id].cold).toBe(0); expect(after.units[target.id].frozenUntil).toBe(3);
+  });
+  it('C21 已就绪受凋亡封锁至下一己方回合，解除后按增加后N检查充能', () => {
+    const s = fresh(); const u = place(s, 'blue', 'g1', 5, 5); u.charge = 4; // 已就绪
+    applyElement(s, u.id, 'decay', 9);
+    expect(u.extraCharge).toBe(1); expect(u.lockUntilOwnTurn).toBe(2);
+    expect(applyAction(s, { type: 'skill', unit: u.id }).ok).toBe(false); // 本己方回合被封锁
+    const r1 = ok(s, { type: 'end' });
+    const r2 = ok(r1, { type: 'end' });
+    expect(r2.players.blue.ownTurn).toBe(2); expect(r2.units[u.id].lockUntilOwnTurn).toBe(2);
+    expect(r2.units[u.id].charge).toBe(5); // 增加后 N = 4 + 1
+    expect(applyAction(r2, { type: 'skill', unit: u.id }).ok).toBe(true); // 下一己方回合解除
   });
 });

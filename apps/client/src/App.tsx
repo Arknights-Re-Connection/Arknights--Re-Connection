@@ -175,7 +175,7 @@ export function App() {
         description: `移动费用 ${moveCost(game, unit, p)}。若有效抵达敌方目标点，得分后该干员本局永久移除，不返还费用。`, direction: true }); return;
     }
     const options = unitsAt(game, p).filter(u =>
-      intent === 'attack' ? u.owner !== viewer : intent === 'heal' ? u.owner === viewer :
+      intent === 'attack' ? u.owner !== viewer && !u.smoke : intent === 'heal' ? u.owner === viewer :
         intent === 'command' ? data?.target === 'ally' ? u.owner === viewer : u.owner !== viewer : true);
     setFocused(p);
     if (options.length === 1) chooseUnit(options[0]);
@@ -318,22 +318,64 @@ export function App() {
         {game && <button onClick={() => setPanel('save')}>对局存档</button>}</nav></header>
 
     {page === 'home' && <main className="home">
-      <div className="hero-copy"><span className="eyebrow">ARKNIGHTS / RE:CONNECTION</span>
+      <div className="hero-copy">
+        <span className="eyebrow">ARKNIGHTS / RE:CONNECTION</span>
         <h1>再连接<span>战术牌桌</span></h1>
-        <p>将每一次部署，变成突破防线的可能。<br />在九乘九的战场上，用卡牌构筑你的战术。</p>
-        <div className="hero-actions"><button className="primary" onClick={() => start('local')}>开始本机对局 <span>↗</span></button>
-          <button className="secondary" onClick={() => start('demo')}>进入战术演练 <span>→</span></button></div>
-        <div className="hero-links"><button onClick={() => setPage('deck')}>配置测试牌组 · {deck.length}/30 →</button>
-          {canResume && <button onClick={resume}>继续已保存对局 →</button>}
-          {game && <button onClick={() => setPage('battle')}>返回当前对局 →</button>}</div>
-        <div className="prototype-note"><span>FIELD MANUAL · 02</span><p>本机双人 · 9×9 战场 · 30 张构筑<br />先进入战术演练，熟悉部署与突破防线。</p></div>
+        <p className="hero-description">将每一次部署，变成突破防线的可能。<br />在九乘九的战场上，用卡牌构筑你的战术。</p>
+        <div className="hero-actions">
+          <button className="primary" onClick={() => start('local')}>
+            <span className="btn-text">开始本机对局</span>
+            <span className="btn-icon">↗</span>
+          </button>
+          <button className="secondary" onClick={() => start('demo')}>
+            <span className="btn-text">进入战术演练</span>
+            <span className="btn-icon">→</span>
+          </button>
+        </div>
+        <div className="hero-links">
+          <button className="link-button" onClick={() => setPage('deck')}>
+            配置测试牌组 · {deck.length}/30
+            <span className="link-arrow">→</span>
+          </button>
+          {canResume && <button className="link-button" onClick={resume}>继续已保存对局 →</button>}
+          {game && <button className="link-button" onClick={() => setPage('battle')}>返回当前对局 →</button>}
+        </div>
+        <div className="prototype-note">
+          <span className="note-badge">FIELD MANUAL · 02</span>
+          <p>本机双人 · 9×9 战场 · 30 张构筑<br />先进入战术演练，熟悉部署与突破防线。</p>
+        </div>
       </div>
-      <div className="hero-visual"><div className="war-dossier"><span>RHODES ISLAND / OPERATIONS DIVISION</span><h2>行动部署图</h2>
-        <div className="hero-grid">{Array.from({ length: 81 }, (_, i) => <i key={i} className={[13, 22, 31, 40, 49, 58, 67].includes(i) ? 'route' : ''} />)}</div><small>机密 · 作战规划 / 09 × 09</small></div>
-        <div className="cover-cards">{['v1', 'g1', 'd1'].map(id => <div className="cover-card" key={id}><span>{catalog[id].profession}<b>{catalog[id].cost}</b></span><CardArt data={catalog[id]} large /><h3>{catalog[id].name}</h3><div><b>{catalog[id].power}</b><Mark small /><b>{catalog[id].hp}</b></div></div>)}</div>
-        <div className="hero-label bottom"><b>3</b><span>突破防线<br />重新建立连接</span></div>
+      <div className="hero-visual">
+        <div className="war-dossier">
+          <span className="dossier-header">RHODES ISLAND / OPERATIONS DIVISION</span>
+          <h2>行动部署图</h2>
+          <div className="hero-grid">{Array.from({ length: 81 }, (_, i) => <i key={i} className={[13, 22, 31, 40, 49, 58, 67].includes(i) ? 'route' : ''} />)}</div>
+          <small className="grid-label">机密 · 作战规划 / 09 × 09</small>
+        </div>
+        <div className="cover-cards">
+          {['v1', 'g1', 'd1'].map(id => (
+            <div className="cover-card" key={id}>
+              <span className="card-profession">{catalog[id].profession}<b className="card-cost">{catalog[id].cost}</b></span>
+              <CardArt data={catalog[id]} large />
+              <h3 className="card-name">{catalog[id].name}</h3>
+              <div className="card-stats">
+                <b className="card-power">{catalog[id].power}</b>
+                <Mark small />
+                <b className="card-hp">{catalog[id].hp}</b>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="hero-label bottom">
+          <b className="label-number">3</b>
+          <span className="label-text">突破防线<br />重新建立连接</span>
+        </div>
       </div>
-      <div className="home-bottom"><span>01 / 先行部署</span><span>02 / 突破防线</span><span>03 / 抵达目标</span></div>
+      <div className="home-bottom">
+        <span className="step-indicator"><span className="step-number">01</span> / 先行部署</span>
+        <span className="step-indicator"><span className="step-number">02</span> / 突破防线</span>
+        <span className="step-indicator"><span className="step-number">03</span> / 抵达目标</span>
+      </div>
     </main>}
 
     {page === 'deck' && <main className="deck-builder"><div className="page-heading"><div><span className="eyebrow">DECK PREPARATION</span><h1>测试牌组配置</h1><p>双方使用同一套所选测试牌组，各自独立洗牌。卡牌均为规则验证内容。</p></div>
