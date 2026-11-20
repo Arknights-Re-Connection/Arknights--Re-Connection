@@ -858,7 +858,7 @@ a { color: var(--gold); }
 .hand-label { display: flex; justify-content: space-between; align-items: center; margin: 8px 0 7px; font-size: 10px; letter-spacing: .5px; color: var(--muted); }
 .hand-label b { color: var(--gold); font-family: var(--font-display); }
 .hand-cards {
-  height: 122px;
+  height: 132px;
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -867,10 +867,10 @@ a { color: var(--gold); }
 }
 .hand-card {
   position: relative;
-  flex: 0 1 112px;
-  max-width: 126px;
+  flex: 0 1 120px;
+  max-width: 136px;
   min-width: 65px;
-  height: 124px;
+  height: 132px;
   margin: 0 -3px;
   padding: 5px;
   color: var(--text);
@@ -888,7 +888,7 @@ a { color: var(--gold); }
   border-color: var(--gold);
   box-shadow: 0 10px 24px rgba(0, 0, 0, .6), 0 0 0 1px var(--gold-dim), 0 0 20px var(--gold-glow);
 }
-.card-top { display: flex; align-items: center; justify-content: flex-end; height: 13px; font-size: 8px; letter-spacing: 1px; color: var(--muted); border-bottom: 1px solid var(--line); }
+.card-top { display: flex; align-items: center; justify-content: flex-end; height: 14px; font-size: 9px; letter-spacing: 1px; color: var(--muted); border-bottom: 1px solid var(--line); }
 .card-top > b {
   position: absolute;
   top: -8px;
@@ -907,12 +907,12 @@ a { color: var(--gold); }
   box-shadow: 0 2px 6px rgba(0, 0, 0, .5);
 }
 .card-top > b.increased { background: var(--danger); border-color: var(--danger); color: #fff; }
-.hand-card .card-art { width: 100%; height: 58px; border: 1px solid var(--line-strong); object-fit: cover; }
-.card-bottom { display: flex; flex-direction: column; align-items: center; gap: 1px; padding-top: 4px; text-align: center; }
-.card-bottom strong { font-size: 10px; font-weight: 600; letter-spacing: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-.card-bottom > span { font-size: 7px; color: var(--muted); }
+.hand-card .card-art { width: 100%; height: 74px; border: 1px solid var(--line-strong); object-fit: cover; }
+.card-bottom { display: flex; flex-direction: column; align-items: center; gap: 1px; padding-top: 3px; text-align: center; }
+.card-bottom strong { font-size: 11px; font-weight: 600; letter-spacing: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.card-bottom > span { font-size: 8px; color: var(--muted); }
 .card-combat { position: absolute; left: 5px; right: 5px; bottom: 5px; display: flex; justify-content: space-between; align-items: center; }
-.card-combat b { width: 21px; height: 21px; display: grid; place-items: center; font-family: var(--font-display); font-size: 13px; font-weight: 700; color: #16130a; background: var(--gold); }
+.card-combat b { width: 22px; height: 22px; display: grid; place-items: center; font-family: var(--font-display); font-size: 13px; font-weight: 700; color: #16130a; background: var(--gold); }
 .card-combat b:last-child { background: var(--steel-dim); color: #fff; }
 .card-combat > span { font-family: var(--font-display); font-size: 10px; letter-spacing: 1px; color: var(--steel); }
 .hand-card:not(.command) .card-bottom > span { display: none; }
