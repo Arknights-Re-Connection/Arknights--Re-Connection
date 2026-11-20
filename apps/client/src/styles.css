@@ -569,6 +569,7 @@ a { color: var(--gold); }
   overflow-x: hidden;
   min-height: 0;
 }
+.side-panel > * { flex-shrink: 0; }
 .battle-heading { display: flex; flex-direction: column; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
 .battle-heading > div:first-child { display: flex; flex-direction: column; gap: 2px; }
 .battle-heading .eyebrow { font-size: 9px; letter-spacing: 2px; }
