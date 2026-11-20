@@ -118,15 +118,15 @@ describe('开局、牌区与资源', () => {
 describe('部署、移动、准入与抵达', () => {
   it('每方八个部署格，包含自己的目标点', () => {
     expect(deploymentArea('blue')).toHaveLength(8); expect(deploymentArea('red')).toHaveLength(8);
-    expect(deploymentArea('blue')).toContainEqual({ r: 9, c: 5 }); expect(deploymentArea('red')).toContainEqual({ r: 1, c: 5 });
+    expect(deploymentArea('blue')).toContainEqual({ r: 9, c: 4 }); expect(deploymentArea('red')).toContainEqual({ r: 1, c: 4 });
   });
   it('第三次部署不能因撤退而获得资格', () => {
     let s = fresh(); s.players.blue.cp = 100;
     const ids = ['v1', 'v2', 'v3'].map(def => hand(s, 'blue', def).id);
-    s = step(s, { type: 'deploy', card: ids[0], position: { r: 8, c: 4 }, direction: 0 });
-    s = step(s, { type: 'deploy', card: ids[1], position: { r: 8, c: 5 }, direction: 0 });
+    s = step(s, { type: 'deploy', card: ids[0], position: { r: 8, c: 3 }, direction: 0 });
+    s = step(s, { type: 'deploy', card: ids[1], position: { r: 8, c: 4 }, direction: 0 });
     s = step(s, { type: 'retreat', unit: ids[0] });
-    expect(applyAction(s, { type: 'deploy', card: ids[2], position: { r: 8, c: 6 }, direction: 0 }).ok).toBe(false);
+    expect(applyAction(s, { type: 'deploy', card: ids[2], position: { r: 8, c: 5 }, direction: 0 }).ok).toBe(false);
   });
   it('部署休整不能被技能绕过，非法动作不改变源状态', () => {
     let s = fresh(); const card = hand(s, 'blue', 'v1');
@@ -155,8 +155,8 @@ describe('部署、移动、准入与抵达', () => {
   });
   it('朝向旋转会改变远程范围', () => {
     expect(rotatedOffset(-2, 0, 1)).toEqual([0, 2]);
-    const s = fresh(); const u = place(s, 'blue', 'n1', 5, 5); u.direction = 1;
-    expect(attackRange(s, u)).toContainEqual({ r: 5, c: 8 });
+    const s = fresh(); const u = place(s, 'blue', 'n1', 5, 4); u.direction = 1;
+    expect(attackRange(s, u)).toContainEqual({ r: 5, c: 7 });
   });
   it('神经使有效移动付费但不落位与得分', () => {
     const s = fresh(); const u = place(s, 'blue', 'g1', 2, 5); u.nerve = true; u.smoke = true;
@@ -165,14 +165,14 @@ describe('部署、移动、准入与抵达', () => {
     expect(next.units[u.id].moved).toBe(true); expect(next.units[u.id].smoke).toBe(false); expect(next.players.blue.score).toBe(0);
   });
   it('抵达永久移除、不返費，第三分立即结束', () => {
-    let s = fresh(); const units = ['v1', 'v2', 'v3'].map(def => place(s, 'blue', def, 2, 5));
-    for (const u of units) s = step(s, { type: 'move', unit: u.id, position: { r: 1, c: 5 }, direction: 0 });
+    let s = fresh(); const units = ['v1', 'v2', 'v3'].map(def => place(s, 'blue', def, 2, 4));
+    for (const u of units) s = step(s, { type: 'move', unit: u.id, position: { r: 1, c: 4 }, direction: 0 });
     expect(s.players.blue.score).toBe(3); expect(s.players.blue.cp).toBe(13); expect(s.players.blue.discard).toHaveLength(0);
     expect(s.players.blue.removed).toHaveLength(3); expect(s.winner).toBe('blue');
   });
   it('目标点仍有防守者存活不能得分', () => {
-    const s = fresh(), a = place(s, 'blue', 'v1', 2, 5); place(s, 'red', 'd1', 1, 5);
-    const next = step(s, { type: 'move', unit: a.id, position: { r: 1, c: 5 }, direction: 0 });
+    const s = fresh(), a = place(s, 'blue', 'v1', 2, 4); place(s, 'red', 'd1', 1, 4);
+    const next = step(s, { type: 'move', unit: a.id, position: { r: 1, c: 4 }, direction: 0 });
     expect(next.players.blue.score).toBe(0); expect(next.units[a.id]).toBeDefined();
     expect(next.units[a.id].hp).toBe(14);
   });

@@ -5,12 +5,16 @@ import { catalog, defaultDeck, validateDeck, CONTENT_VERSION } from '../content'
 import type { Action, CardDefinition, CardInstance, Direction, Element, GameState, Outcome, Player, PlayerView, Position, Side, Unit } from './types';
 
 export const RULES_VERSION = 'prd-v1-prototype-0.1';
+// 棋盘几何：9 行 × 7 列（横 7 纵 9），部署区/目标点居中于 CENTER_COL 列
+export const BOARD_ROWS = 9;
+export const BOARD_COLS = 7;
+export const CENTER_COL = Math.ceil(BOARD_COLS / 2); // = 4
 export const sides: Side[] = ['blue', 'red'];
 export const other = (side: Side): Side => side === 'blue' ? 'red' : 'blue';
 export const sideName = (side: Side) => side === 'blue' ? '蓝方' : '红方';
 export const elementName: Record<Element, string> = { burn: '灼燃', nerve: '神经', decay: '凋亡' };
 export const samePosition = (a: Position, b: Position) => a.r === b.r && a.c === b.c;
-export const inside = (p: Position) => Number.isInteger(p.r) && Number.isInteger(p.c) && p.r >= 1 && p.r <= 9 && p.c >= 1 && p.c <= 9;
+export const inside = (p: Position) => Number.isInteger(p.r) && Number.isInteger(p.c) && p.r >= 1 && p.r <= BOARD_ROWS && p.c >= 1 && p.c <= BOARD_COLS;
 // 统一失败出口：任何校验不通过都抛错
 function fail(message: string): never { throw new Error(message); }
 // 由卡实例 id 查其卡牌定义（数值面板）
@@ -36,14 +40,16 @@ function shuffle<T>(s: GameState, list: T[]) {
     [list[i], list[j]] = [list[j], list[i]];
   }
 }
-// 双方部署区：底线 5 格 + 第二行 3 格
+// 双方部署区：底线 5 格 + 第二行 3 格（居中于 CENTER_COL）
 export function deploymentArea(side: Side): Position[] {
-  return side === 'blue'
-    ? [3, 4, 5, 6, 7].map(c => ({ r: 9, c })).concat([4, 5, 6].map(c => ({ r: 8, c })))
-    : [3, 4, 5, 6, 7].map(c => ({ r: 1, c })).concat([4, 5, 6].map(c => ({ r: 2, c })));
+  const row1 = side === 'blue' ? BOARD_ROWS : 1;
+  const row2 = side === 'blue' ? BOARD_ROWS - 1 : 2;
+  const back = [CENTER_COL - 2, CENTER_COL - 1, CENTER_COL, CENTER_COL + 1, CENTER_COL + 2];
+  const front = [CENTER_COL - 1, CENTER_COL, CENTER_COL + 1];
+  return back.map(c => ({ r: row1, c })).concat(front.map(c => ({ r: row2, c })));
 }
 export const isDeployment = (side: Side, p: Position) => deploymentArea(side).some(x => samePosition(x, p));
-export const targetFor = (side: Side): Position => ({ r: side === 'blue' ? 1 : 9, c: 5 });
+export const targetFor = (side: Side): Position => ({ r: side === 'blue' ? 1 : BOARD_ROWS, c: CENTER_COL });
 // 某格上的单位，按进场先后排序（队首在最前）
 export function unitsAt(s: GameState, p: Position, side?: Side) {
   return Object.values(s.units).filter(u => samePosition(u, p) && (!side || u.owner === side)).sort((a, b) => a.entered - b.entered);
@@ -187,7 +193,7 @@ function resolveClash(s: GameState, p: Position) {
 }
 // 全图扫描所有对峙格并逐一结算
 function resolveAllClashes(s: GameState) {
-  for (let r = 1; r <= 9 && !s.winner; r++) for (let c = 1; c <= 9 && !s.winner; c++) {
+  for (let r = 1; r <= BOARD_ROWS && !s.winner; r++) for (let c = 1; c <= BOARD_COLS && !s.winner; c++) {
     if (fightersAt(s, { r, c }, 'blue').length && fightersAt(s, { r, c }, 'red').length) resolveClash(s, { r, c });
   }
   checkScores(s);
@@ -300,7 +306,7 @@ function validateMove(s: GameState, u: Unit, p: Position) {
 export function legalMoves(s: GameState, id: string): Position[] {
   const u = s.units[id]; if (!u || u.owner !== s.active || s.phase !== 'action') return [];
   const list: Position[] = [];
-  for (let r = 1; r <= 9; r++) for (let c = 1; c <= 9; c++) {
+  for (let r = 1; r <= BOARD_ROWS; r++) for (let c = 1; c <= BOARD_COLS; c++) {
     try { validateMove(s, u, { r, c }); if (!samePosition(u, { r, c }) && s.players[u.owner].cp >= moveCost(s, u, { r, c })) list.push({ r, c }); } catch { /* Illegal positions are deliberately excluded. */ }
   }
   return list;
