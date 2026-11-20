@@ -15,6 +15,18 @@ const professions = ['先锋', '近卫', '重装', '特种', '狙击', '术士',
 const arrows = ['↑', '→', '↓', '←'];
 const professionShort: Record<string, string> = { 先锋: 'V', 近卫: 'G', 重装: 'D', 特种: 'S', 狙击: 'N', 术士: 'C', 医疗: 'M', 辅助: 'A' };
 
+// 悬浮磁贴定位：锚定在鼠标旁，做视口边缘翻转，避免溢出屏幕
+function tooltipPosition(a: { x: number; y: number } | undefined): React.CSSProperties | undefined {
+  if (!a) return undefined;
+  const W = 300, H = 400;
+  let x = a.x + 22, y = a.y - 40;
+  if (x + W > window.innerWidth - 12) x = a.x - W - 22;
+  if (x < 12) x = 12;
+  if (y + H > window.innerHeight - 12) y = window.innerHeight - H - 12;
+  if (y < 12) y = 12;
+  return { left: x, top: y };
+}
+
 function HandCardFace({ data, cost }: { data: (typeof definitions)[number]; cost: number }) {
   return <>
     <div className="card-top"><span>{data.profession ?? `${data.grade} 指令`}</span><b className={cost > data.cost ? 'increased' : ''}>◇{cost}</b></div>
@@ -69,12 +81,15 @@ export function App() {
   const [discardSelection, setDiscardSelection] = useState<string[]>([]);
   const [dropPick, setDropPick] = useState<{ cardId: string; position: Position; direction?: Direction }>();
   const [gridCoords, setGridCoords] = useState(true);
+  const [hoveredUnit, setHoveredUnit] = useState<string>();
+  const [tooltipAnchor, setTooltipAnchor] = useState<{ x: number; y: number }>();
+  const hideTimer = useRef<number | undefined>(undefined);
+  const mouseRef = useRef({ x: 0, y: 0 });
   const importInput = useRef<HTMLInputElement>(null);
   const mapRef = useRef<HTMLElement | null>(null);
   const handRef = useRef<HTMLDivElement | null>(null);
   const handLayout = useRef<Map<string, DOMRect> | undefined>(undefined);
   const pointerDrag = useRef<{ pointerId: number; cardId: string; startX: number; startY: number; dragging: boolean; element?: HTMLElement } | undefined>(undefined);
-  const suppressClick = useRef(false);
   const lastSaved = useRef<number | undefined>(undefined);
   useLayoutEffect(() => {
     const previous = handLayout.current;
@@ -107,6 +122,17 @@ export function App() {
     const cancel = (e: KeyboardEvent) => { if (e.key === 'Escape') { setPending(undefined); setPanel(undefined); setIntent('inspect'); setSelected(undefined); setDropPick(undefined); setDraggedCard(undefined); releaseDrag(); } };
     window.addEventListener('keydown', cancel); return () => window.removeEventListener('keydown', cancel);
   }, []);
+  useEffect(() => {
+    const move = (e: PointerEvent) => { mouseRef.current = { x: e.clientX, y: e.clientY }; };
+    window.addEventListener('pointermove', move, { passive: true });
+    return () => window.removeEventListener('pointermove', move);
+  }, []);
+  function cancelHideTooltip() { if (hideTimer.current !== undefined) { clearTimeout(hideTimer.current); hideTimer.current = undefined; } }
+  function scheduleHideTooltip() { cancelHideTooltip(); hideTimer.current = window.setTimeout(() => setHoveredUnit(undefined), 150); }
+  function handleHoverUnit(id?: string) {
+    if (id) { cancelHideTooltip(); setTooltipAnchor({ x: mouseRef.current.x, y: mouseRef.current.y }); setHoveredUnit(id); }
+    else scheduleHideTooltip();
+  }
   const view = useMemo(() => game ? getView(game, viewer) : undefined, [game, viewer]);
   const shown = selected ?? previewed;
   const selectedCard = shown ? view?.visibleCards[shown] : undefined;
@@ -114,6 +140,11 @@ export function App() {
   const unit = shown ? game?.units[shown] : undefined;
   const friendly = unit && unit.owner === viewer;
   const active = game?.active === viewer;
+  const hoveredUnitObj = hoveredUnit ? game?.units[hoveredUnit] : undefined;
+  const hoveredUnitData = hoveredUnitObj && game ? definition(game, hoveredUnitObj.id) : undefined;
+  const hoveredFriendly = hoveredUnitObj?.owner === viewer;
+  const tooltipCard = previewed && !handoff ? view?.visibleCards[previewed] : undefined;
+  const tooltipCardData = tooltipCard ? catalog[tooltipCard.definition] : undefined;
   const onAction = (action: Action) => {
     if (!game) return;
     const result = applyAction(game, action);
@@ -257,7 +288,6 @@ export function App() {
     setTimeout(() => { if (el?.hasPointerCapture(pid)) { try { el.releasePointerCapture(pid); } catch { /* noop */ } } }, 0);
     if (!drag.dragging) return;
     e.preventDefault();
-    suppressClick.current = true;
     captureHandLayout();
     setDraggedCard(undefined);
     dropCardAt(drag.cardId, e.clientX, e.clientY);
@@ -401,102 +431,91 @@ export function App() {
     </main>}
 
     {page === 'battle' && game && view && boardModel && <main className="battle" inert={!!handoff}>
-      <div className="battle-heading"><div><span className="eyebrow">TACTICAL OPERATION / {game.mode === 'demo' ? '预设演练' : '本机双人'}</span>
-        <h1>再连接作战 <span>测试地图 01</span></h1></div><div className="round-info"><span>全局回合</span><b>{String(game.turn).padStart(2, '0')}<small>/40</small></b><i /> <span>{sideName(viewer)}视角</span></div></div>
-      <section className="opponent-rail" aria-label="敌方牌区">
-        <Resource player={view.players[other(viewer)]} enemy />
-        <button className="pile deck" title="敌方抽牌堆内容隐藏" onClick={() => setToast('敌方抽牌堆仅公开剩余张数')}><Mark small /><b>{view.players[other(viewer)].deckCount}</b><span>抽牌堆</span></button>
-        <div className="enemy-hand"><span className="eyebrow">敌方手牌 / {view.players[other(viewer)].handCount}</span><div>{Array.from({ length: view.players[other(viewer)].handCount }, (_, i) => <div className="card-back" key={i}><Mark small /></div>)}</div></div>
-        <button className="pile discard" onClick={() => { setPile({ side: other(viewer), zone: 'discard' }); setPanel('pile'); }}><span className="pile-glyph">▤</span><b>{view.players[other(viewer)].discard.length}</b><span>弃牌堆</span></button>
-      </section>
-      <div className="operation-layout">
-        <aside className="operation-left">
-          <div className="section-label">回合信标 <span>TURN</span></div>
-          <div className="turn-lamps"><div className={!active ? 'lit enemy' : 'enemy'}><i className="triangle up" /><span>敌方回合</span></div><div className={active ? 'lit' : ''}><i className="triangle down" /><span>我方回合</span></div></div>
-          <div className="score-panel"><span className="section-label">抵达进度 <span>GOAL</span></span>
-            {[viewer, other(viewer)].map(side => <div className={`score-row ${side !== viewer ? 'enemy' : ''}`} key={side}><span>{side === viewer ? '我方' : '敌方'}</span><div>{[0, 1, 2].map(i => <i key={i} className={i < game.players[side].score ? 'scored' : ''} />)}</div><b>{game.players[side].score}/3</b></div>)}
-            <button onClick={() => { setPile({ side: viewer, zone: 'removed' }); setPanel('pile'); }}>查看永久移除 →</button></div>
-          <div className="mission-info"><span className="eyebrow">作战目标</span><p>让三名干员抵达<br /><b>敌方目标点</b></p><small>抵达即永久移出本局</small></div>
-          <div className="action-quota"><span>本回合部署</span><b>{game.players[game.active].deployed}<small>/2</small></b></div>
-          <div className="board-key"><span><i className="friendly-dot" /> 我方部署区</span><span><i className="enemy-dot" /> 敌方部署区</span></div>
-        </aside>
-        <section className="map-section" ref={mapRef}><div className="map-topline"><span>战场网格 · 7 × 9</span><span>{hovered && gridCoords ? `R${displayPosition(hovered, viewer).r}C${displayPosition(hovered, viewer).c}` : '选择卡牌或干员'}</span></div>
-          <Board model={boardModel} onCell={cellClick} onHover={setHovered}
-            onRight={() => { setDropPick(undefined); setDraggedCard(undefined); }}
-            onDirectionHover={direction => setDropPick(current => current && current.direction !== direction ? { ...current, direction } : current)}
-            onDirection={direction => {
-              if (!dropPick) return;
-              const { cardId, position } = dropPick;
-              setDropPick(undefined);
-              onAction({ type: 'deploy', card: cardId, position, direction });
-            }} />
-          {dropPick && <div className="aiming-hud" aria-live="polite"><i>{arrows[((dropPick.direction ?? (game.active === 'blue' ? 0 : 2)) + (viewer === 'red' ? 2 : 0)) % 4]}</i><span>部署朝向</span><small>拖动定向 · 点击箭头</small></div>}
-          <div className="map-bottomline"><span>{dropPick ? '拖出中心标记确定朝向 · 点击周围箭头也可确认' : intent === 'deploy' ? '选择部署区与朝向' : intent === 'move' ? '选择落点与朝向' : intent === 'attack' ? '选择敌方干员' : intent === 'heal' ? '选择受伤的己方干员' : intent === 'command' ? '选择指令目标' : '左键选择 · 右键取消 · Esc 返回'}</span>
-            {intent !== 'inspect' && <button onClick={() => { setIntent('inspect'); setSelected(undefined); setDropPick(undefined); }}>取消选择 ×</button>}</div></section>
-        <aside className="operation-right">
-          <div className="section-label">干员档案 <span>OPERATOR FILE</span></div>
-          <div className="detail-scroll">
-            <div className="dossier-entry" key={shown ?? 'empty'}>
-            {data && selectedCard ? <>
-              <div className="detail-title"><span>{data.profession ?? `${data.grade} 级指令`} <i>测试卡</i></span><h2>{data.name}</h2><p>{data.description}</p></div>
-              {data.kind === 'operator' ? <>
-                <div className="detail-art"><CardArt data={data} large /><span>{professionShort[data.profession!]}<small>OPERATOR</small></span></div>
-                <div className="stats"><div><span>生命</span><b>{unit?.hp ?? data.hp}<small>/{data.hp}</small></b></div><div><span>{data.profession === '医疗' ? '治疗' : data.damage === 'arts' ? '法伤' : data.damage === 'true' ? '真伤' : '物伤'}</span><b>{data.power}</b></div>
-                  <div><span>物抗 / 法抗</span><b>{data.armor}<small> / {data.resist}</small></b></div><div><span>阻挡</span><b>{data.block}</b></div></div>
-                <div className="cost-detail"><span>基础 / 当前部署费</span><b>{data.cost} / {selectedCard.cost} ◇</b></div>
-                {unit && <>
-                  <div className="status-tags">{unit.deployed === game.turn && <span>部署休整</span>}{unit.moved && <span>本回合已移动</span>}{blocked(game, unit) && <span>被阻挡</span>}
-                    {frozen(game, unit) && <span>冻结至全局 {unit.frozenUntil} 回合结束</span>}{unit.cold > 0 && <span>寒冷 {unit.cold} 层</span>}{unit.smoke && <span>烟雾</span>}{unit.nerve && <span>神经待发</span>}
-                    {unit.immuneUntil >= game.turn && <span>元素累计免疫</span>}</div>
-                  <div className="skill-box"><div><b>{data.skill!.name}</b><span>{unit.skillActive ? data.skill!.type === 'ammo' ? `弹药 ${unit.ammo}` : '技能生效中' : `${unit.charge}/${data.skill!.turns + unit.extraCharge}`}</span></div>
-                    <div className="charge-line"><i style={{ width: `${unit.skillActive ? 100 : 100 * unit.charge / (data.skill!.turns + unit.extraCharge)}%` }} /></div>
-                    <small>{data.skill!.type === 'ammo' ? '弹药型 · 后续费用每次 +1' : '普通型 · 后续费用每次 ×2'}{unit.skillActive && ` · 已行动 ${unit.skillK} 次`}</small></div>
-                  <div className="element-detail"><span>元素累计 {Object.values(unit.elements).reduce((a, b) => a + b, 0)}/9</span><div>{(['burn', 'nerve', 'decay'] as const).map(e => <small key={e}>{elementName[e]} {unit.elements[e]}</small>)}</div></div>
-                  {friendly && active && <div className="operator-actions">
-                    <button className={intent === 'move' ? 'active' : ''} onClick={() => setIntent('move')}>移动 <span>{unit.moved ? '已使用' : '选择范围'}</span></button>
-                    <button className={intent === (data.profession === '医疗' ? 'heal' : 'attack') ? 'active' : ''} onClick={() => setIntent(data.profession === '医疗' ? 'heal' : 'attack')}>{data.profession === '医疗' ? '治疗' : '攻击'}<span>{actionCost(game, unit, data.profession === '医疗')} ◇</span></button>
-                    <button onClick={() => onAction({ type: unit.skillActive ? 'closeSkill' : 'skill', unit: unit.id })}>{unit.skillActive ? '关闭技能' : '开启技能'}<span>{unit.skillActive ? '进入回转' : '检查充能'}</span></button>
-                    <button className="retreat" onClick={() => setPending({ action: { type: 'retreat', unit: unit.id }, title: '撤退干员', description: `「${data.name}」洗入弃牌堆，后续部署费 +5，不回复指挥点；撤退不限次数。` })}>撤退 <span>后续费 +5</span></button>
-                  </div>}
-                </>}
-                {!unit && <p className="hint">从手牌选择干员后，点击地图中高亮的我方部署格。</p>}
-              </> : <>
-                <CardArt data={data} large /><div className="cost-detail"><span>基础 / 当前使用费</span><b>{data.cost} / {selectedCard.cost} ◇</b></div>
-                {data.target === 'global' ? (selected ? <button className="primary full" onClick={() => requestCommand(selectedCard)}>使用此指令</button> : <p className="hint">点击选中这张指令卡后即可使用。</p>) : <p className="hint">选择高亮的{data.target === 'ally' ? '己方' : '敌方'}干员；也可以将卡牌直接拖向地图。</p>}
-              </>}
-            </> : <div className="detail-empty"><Mark /><h3>等待战术指令</h3><p>选择手牌以部署干员，<br />选择地图单位查看作战信息。</p><span>SELECT AN OPERATOR</span></div>}
-            </div>
-            {focused && unitsAt(game, focused).length > 0 && <div className="cell-queue"><span className="eyebrow">当前区块队列</span>{unitsAt(game, focused).map((u, i) => <button key={u.id} onClick={() => chooseUnit(u)}><i className={u.owner === viewer ? 'friendly-dot' : 'enemy-dot'} /><span>{definition(game, u.id).name}</span><small>{u.hp} HP</small><b>#{i + 1}</b></button>)}</div>}
+      <aside className="side-panel">
+        <div className="battle-heading"><div><span className="eyebrow">TACTICAL OPERATION / {game.mode === 'demo' ? '预设演练' : '本机双人'}</span>
+          <h1>再连接作战 <span>测试地图 01</span></h1></div><div className="round-info"><span>全局回合</span><b>{String(game.turn).padStart(2, '0')}<small>/40</small></b><i /> <span>{sideName(viewer)}视角</span></div></div>
+        <section className="opponent-rail" aria-label="敌方牌区">
+          <Resource player={view.players[other(viewer)]} enemy />
+          <div className="enemy-hand"><span className="eyebrow">敌方手牌 / {view.players[other(viewer)].handCount}</span><div>{Array.from({ length: view.players[other(viewer)].handCount }, (_, i) => <div className="card-back" key={i}><Mark small /></div>)}</div></div>
+          <div className="side-piles">
+            <button className="pile deck" title="敌方抽牌堆内容隐藏" onClick={() => setToast('敌方抽牌堆仅公开剩余张数')}><Mark small /><b>{view.players[other(viewer)].deckCount}</b><span>抽牌堆</span></button>
+            <button className="pile discard" onClick={() => { setPile({ side: other(viewer), zone: 'discard' }); setPanel('pile'); }}><span className="pile-glyph">▤</span><b>{view.players[other(viewer)].discard.length}</b><span>弃牌堆</span></button>
           </div>
-          <button className="end-turn" disabled={!active || game.phase !== 'action'} onClick={() => onAction({ type: 'end' })}>结束回合 <span>→</span></button>
-        </aside>
-      </div>
+        </section>
+        <div className="section-label">回合信标 <span>TURN</span></div>
+        <div className="turn-lamps"><div className={!active ? 'lit enemy' : 'enemy'}><i className="triangle up" /><span>敌方回合</span></div><div className={active ? 'lit' : ''}><i className="triangle down" /><span>我方回合</span></div></div>
+        <div className="score-panel"><span className="section-label">抵达进度 <span>GOAL</span></span>
+          {[viewer, other(viewer)].map(side => <div className={`score-row ${side !== viewer ? 'enemy' : ''}`} key={side}><span>{side === viewer ? '我方' : '敌方'}</span><div>{[0, 1, 2].map(i => <i key={i} className={i < game.players[side].score ? 'scored' : ''} />)}</div><b>{game.players[side].score}/3</b></div>)}
+          <button onClick={() => { setPile({ side: viewer, zone: 'removed' }); setPanel('pile'); }}>查看永久移除 →</button></div>
+        <div className="mission-info"><span className="eyebrow">作战目标</span><p>让三名干员抵达<br /><b>敌方目标点</b></p><small>抵达即永久移出本局</small></div>
+        <div className="action-quota"><span>本回合部署</span><b>{game.players[game.active].deployed}<small>/2</small></b></div>
+        <div className="board-key"><span><i className="friendly-dot" /> 我方部署区</span><span><i className="enemy-dot" /> 敌方部署区</span></div>
+        <div className="own-resource"><Resource player={view.players[viewer]} /></div>
+        <div className="side-piles">
+          <button className="pile discard" onClick={() => { setPile({ side: viewer, zone: 'discard' }); setPanel('pile'); }}><span className="pile-glyph">▤</span><b>{view.players[viewer].discard.length}</b><span>弃牌堆</span></button>
+          <button className="pile deck" onClick={() => setToast('己方抽牌堆顺序隐藏；自己的回合开始自动抽 2 张')}><Mark small /><b>{view.players[viewer].deckCount}</b><span>抽牌堆</span></button>
+        </div>
+        <div className="log-strip"><span>作战记录</span><p>{game.logs.at(-1)?.text}</p><button onClick={() => setPanel('save')}>日志与存档 ↗</button></div>
+      </aside>
+      <section className="map-section" ref={mapRef}>
+        <div className="map-topline"><span>战场网格 · 7 × 9</span><span>{hovered && gridCoords ? `R${displayPosition(hovered, viewer).r}C${displayPosition(hovered, viewer).c}` : '选择卡牌或干员'}</span></div>
+        <Board model={boardModel} onCell={cellClick} onHover={setHovered} onHoverUnit={handleHoverUnit}
+          onRight={() => { setDropPick(undefined); setDraggedCard(undefined); }}
+          onDirectionHover={direction => setDropPick(current => current && current.direction !== direction ? { ...current, direction } : current)}
+          onDirection={direction => {
+            if (!dropPick) return;
+            const { cardId, position } = dropPick;
+            setDropPick(undefined);
+            onAction({ type: 'deploy', card: cardId, position, direction });
+          }} />
+        {dropPick && <div className="aiming-hud" aria-live="polite"><i>{arrows[((dropPick.direction ?? (game.active === 'blue' ? 0 : 2)) + (viewer === 'red' ? 2 : 0)) % 4]}</i><span>部署朝向</span><small>拖动定向 · 点击箭头</small></div>}
+        <div className="map-bottomline"><span>{dropPick ? '拖出中心标记确定朝向 · 点击周围箭头也可确认' : intent === 'deploy' ? '选择部署区与朝向' : intent === 'move' ? '选择落点与朝向' : intent === 'attack' ? '选择敌方干员' : intent === 'heal' ? '选择受伤的己方干员' : intent === 'command' ? '选择指令目标' : '拖动卡牌部署 · 悬停查看 · 右键取消 · Esc 返回'}</span>
+          {intent !== 'inspect' && <button onClick={() => { setIntent('inspect'); setSelected(undefined); setDropPick(undefined); }}>取消选择 ×</button>}</div>
+        {focused && unitsAt(game, focused).length > 1 && <div className="cell-queue"><span className="eyebrow">当前区块队列</span>{unitsAt(game, focused).map((u, i) => <button key={u.id} onClick={() => chooseUnit(u)}><i className={u.owner === viewer ? 'friendly-dot' : 'enemy-dot'} /><span>{definition(game, u.id).name}</span><small>{u.hp} HP</small><b>#{i + 1}</b></button>)}</div>}
+      </section>
       <section className={`friendly-rail ${draggedCard ? 'card-in-hand' : ''}`} aria-label="我方牌区">
-        <Resource player={view.players[viewer]} />
-        <button className="pile discard" onClick={() => { setPile({ side: viewer, zone: 'discard' }); setPanel('pile'); }}><span className="pile-glyph">▤</span><b>{view.players[viewer].discard.length}</b><span>弃牌堆</span></button>
-        <div className="hand-area"><div className="hand-label"><span>我方手牌 <b>{view.players[viewer].handCount}/8</b></span><span>{active ? '选择或拖动卡牌' : '等待回合交接'}</span></div>
-          <div className={`hand-cards ${selected ? 'locked' : ''} ${draggedCard ? 'card-dragging' : ''}`} ref={handRef}>{handoff ? Array.from({ length: view.players[viewer].handCount }, (_, i) => <div className="card-back" key={i}><Mark small /></div>) : view.players[viewer].hand?.map((card, index, cards) => {
-            const d = catalog[card.definition]; const playable = active && game.phase === 'action' && card.cost <= game.players[viewer].cp && (d.kind === 'command' || game.players[viewer].deployed < 2);
+        <div className="hand-area"><div className="hand-label"><span>我方手牌 <b>{view.players[viewer].handCount}/8</b></span><span>{active ? '拖动卡牌部署' : '等待回合交接'}</span></div>
+          <div className={`hand-cards ${draggedCard ? 'card-dragging' : ''}`} ref={handRef}>{handoff ? Array.from({ length: view.players[viewer].handCount }, (_, i) => <div className="card-back" key={i}><Mark small /></div>) : view.players[viewer].hand?.map((card, index, cards) => {
+            const d = catalog[card.definition];
             const inHand = draggedCard?.cardId === card.id;
-            return <button className={`hand-card ${selected === card.id ? 'selected' : ''} ${d.kind === 'command' ? 'command' : ''} ${playable ? 'playable' : 'unaffordable'} ${inHand ? 'drag-card-proxy' : ''}`} key={card.id}
+            return <button className={`hand-card ${d.kind === 'command' ? 'command' : ''} ${inHand ? 'drag-card-proxy' : ''}`} key={card.id}
               style={{ '--fan': `${(index - (cards.length - 1) / 2) * 2.4}deg`, '--fan-lift': `${Math.abs(index - (cards.length - 1) / 2) * 2}px`,
                 ...(inHand ? { left: draggedCard.x, top: draggedCard.y } : {}) } as React.CSSProperties}
               data-testid={`card-${card.definition}`} data-card-id={card.id} aria-label={`${d.name}，${card.cost}费`}
-              onClick={e => {
-                if (suppressClick.current) { suppressClick.current = false; e.preventDefault(); return; }
-                chooseCard(card);
-              }}
-              onMouseEnter={() => setPreviewed(card.id)} onMouseLeave={() => setPreviewed(p => (p === card.id ? undefined : p))}
+              onMouseEnter={e => { setTooltipAnchor({ x: e.clientX, y: e.clientY }); setPreviewed(card.id); }} onMouseLeave={() => setPreviewed(p => (p === card.id ? undefined : p))}
               onPointerDown={e => startCardDrag(card, e)} onPointerMove={e => moveCardDrag(card, e)}
               onPointerUp={endCardDrag} onPointerCancel={cancelCardDrag}>
               <HandCardFace data={d} cost={card.cost} />
               {inHand && <span className="drag-hint">已拿起 · 拖至战场</span>}
             </button>;
           })}</div></div>
-        <button className="pile deck" onClick={() => setToast('己方抽牌堆顺序隐藏；自己的回合开始自动抽 2 张')}><Mark small /><b>{view.players[viewer].deckCount}</b><span>抽牌堆</span></button>
+        <button className="end-turn" disabled={!active || game.phase !== 'action'} onClick={() => onAction({ type: 'end' })}>结束回合 <span>→</span></button>
       </section>
-      <div className="log-strip"><span>作战记录</span><p>{game.logs.at(-1)?.text}</p><button onClick={() => setPanel('save')}>日志与存档 ↗</button></div>
     </main>}
+
+    {game && tooltipCardData && tooltipCard && <div className="floating-tooltip card" style={tooltipPosition(tooltipAnchor)} onMouseEnter={cancelHideTooltip} onMouseLeave={cancelHideTooltip}>
+      <div className="tooltip-title"><span>{tooltipCardData.profession ?? `${tooltipCardData.grade} 级指令`} <i>测试卡</i></span><h2>{tooltipCardData.name}</h2></div>
+      <CardArt data={tooltipCardData} large />
+      <div className="cost-detail"><span>当前费用</span><b>{tooltipCard.cost} ◇</b></div>
+      <p className="tooltip-desc">{tooltipCardData.description}</p>
+      {tooltipCardData.kind === 'operator' && <p className="hint">拖动到己方部署区即可部署；悬停查看信息。</p>}
+    </div>}
+    {game && hoveredUnitData && hoveredUnitObj && <div className="floating-tooltip unit" style={tooltipPosition(tooltipAnchor)} onMouseEnter={cancelHideTooltip} onMouseLeave={scheduleHideTooltip}>
+      <div className="tooltip-title"><span>{hoveredUnitData.profession ?? `${hoveredUnitData.grade} 级指令`} <i>测试卡</i></span><h2>{hoveredUnitData.name}</h2><p>{hoveredUnitData.description}</p></div>
+      <div className="tooltip-stats"><div><span>生命</span><b>{hoveredUnitObj.hp}<small>/{hoveredUnitData.hp}</small></b></div><div><span>{hoveredUnitData.profession === '医疗' ? '治疗' : hoveredUnitData.damage === 'arts' ? '法伤' : hoveredUnitData.damage === 'true' ? '真伤' : '物伤'}</span><b>{hoveredUnitData.power}</b></div>
+        <div><span>物抗 / 法抗</span><b>{hoveredUnitData.armor}<small> / {hoveredUnitData.resist}</small></b></div><div><span>阻挡</span><b>{hoveredUnitData.block}</b></div></div>
+      <div className="status-tags">{hoveredUnitObj.deployed === game.turn && <span>部署休整</span>}{hoveredUnitObj.moved && <span>本回合已移动</span>}{blocked(game, hoveredUnitObj) && <span>被阻挡</span>}
+        {frozen(game, hoveredUnitObj) && <span>冻结</span>}{hoveredUnitObj.cold > 0 && <span>寒冷 {hoveredUnitObj.cold} 层</span>}{hoveredUnitObj.smoke && <span>烟雾</span>}{hoveredUnitObj.nerve && <span>神经待发</span>}{hoveredUnitObj.immuneUntil >= game.turn && <span>元素免疫</span>}</div>
+      <div className="skill-box"><div><b>{hoveredUnitData.skill!.name}</b><span>{hoveredUnitObj.skillActive ? hoveredUnitData.skill!.type === 'ammo' ? `弹药 ${hoveredUnitObj.ammo}` : '技能生效中' : `${hoveredUnitObj.charge}/${hoveredUnitData.skill!.turns + hoveredUnitObj.extraCharge}`}</span></div>
+        <div className="charge-line"><i style={{ width: `${hoveredUnitObj.skillActive ? 100 : 100 * hoveredUnitObj.charge / (hoveredUnitData.skill!.turns + hoveredUnitObj.extraCharge)}%` }} /></div></div>
+      <div className="element-detail"><span>元素累计 {Object.values(hoveredUnitObj.elements).reduce((a, b) => a + b, 0)}/9</span><div>{(['burn', 'nerve', 'decay'] as const).map(e => <small key={e}>{elementName[e]} {hoveredUnitObj.elements[e]}</small>)}</div></div>
+      {hoveredFriendly && active && <div className="operator-actions">
+        <button onClick={() => { setSelected(hoveredUnit); setIntent('move'); setHoveredUnit(undefined); }}>移动 <span>{hoveredUnitObj.moved ? '已使用' : '选择范围'}</span></button>
+        <button onClick={() => { setSelected(hoveredUnit); setIntent(hoveredUnitData.profession === '医疗' ? 'heal' : 'attack'); setHoveredUnit(undefined); }}>{hoveredUnitData.profession === '医疗' ? '治疗' : '攻击'}<span>{actionCost(game, hoveredUnitObj, hoveredUnitData.profession === '医疗')} ◇</span></button>
+        <button onClick={() => onAction({ type: hoveredUnitObj.skillActive ? 'closeSkill' : 'skill', unit: hoveredUnitObj.id })}>{hoveredUnitObj.skillActive ? '关闭技能' : '开启技能'}</button>
+        <button className="retreat" onClick={() => setPending({ action: { type: 'retreat', unit: hoveredUnitObj.id }, title: '撤退干员', description: `「${hoveredUnitData.name}」洗入弃牌堆，后续部署费 +5，不回复指挥点；撤退不限次数。` })}>撤退</button>
+      </div>}
+    </div>}
 
     {pending && game && <Modal title={pending.title} onClose={() => setPending(undefined)}><p className="confirm-description">{pending.description}</p>
       {pending.direction && 'direction' in pending.action && <div className="direction-picker"><span>落地朝向</span>{arrows.map((arrow, index) => {

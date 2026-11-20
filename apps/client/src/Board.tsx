@@ -36,6 +36,7 @@ interface BoardProps {
   model: BoardModel;
   onCell: (p: Position) => void;
   onHover: (p?: Position) => void;
+  onHoverUnit?: (id?: string) => void;
   onRight?: () => void;
   onDirectionHover?: (direction?: Direction) => void;
   onDirection?: (direction: Direction) => void;
@@ -54,6 +55,7 @@ class TacticalScene extends Phaser.Scene {
   dataModel?: BoardModel;
   cellClick: (p: Position) => void = () => {};
   cellHover: (p?: Position) => void = () => {};
+  cellHoverUnit: (id?: string) => void = () => {};
   cellRight: () => void = () => {};
   directionHover: (direction?: Direction) => void = () => {};
   directionSelect: (direction: Direction) => void = () => {};
@@ -66,6 +68,8 @@ class TacticalScene extends Phaser.Scene {
   private poolCursor = 0;
   private poolSizes = new Map<Phaser.GameObjects.Text, number>();
   private lastHover = '';
+  private lastHoverUnit = '';
+  private unitHits: { id: string; x: number; y: number; w: number; h: number }[] = [];
   private orientationGesture = false;
   private previewDirection?: Direction;
   create() {
@@ -92,6 +96,8 @@ class TacticalScene extends Phaser.Scene {
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
       const p = this.position(pointer.x, pointer.y); const key = p ? `${p.r}:${p.c}` : '';
       if (key !== this.lastHover) { this.lastHover = key; this.cellHover(p); }
+      const hit = this.hitUnit(pointer.x, pointer.y); const hitId = hit ?? '';
+      if (hitId !== this.lastHoverUnit) { this.lastHoverUnit = hitId; this.cellHoverUnit(hit); }
       const target = this.dataModel?.dropPick;
       if (target) {
         const visible = displayPosition(target, this.dataModel?.viewer ?? 'blue');
@@ -112,9 +118,17 @@ class TacticalScene extends Phaser.Scene {
     });
     this.input.on('gameout', () => {
       this.lastHover = ''; this.cellHover(undefined);
+      this.lastHoverUnit = ''; this.cellHoverUnit(undefined);
       if (!this.orientationGesture) this.setPreviewDirection(undefined);
     });
     this.paint();
+  }
+  private hitUnit(x: number, y: number): string | undefined {
+    for (let i = this.unitHits.length - 1; i >= 0; i--) {
+      const h = this.unitHits[i];
+      if (x >= h.x - h.w / 2 && x <= h.x + h.w / 2 && y >= h.y - h.h / 2 && y <= h.y + h.h / 2) return h.id;
+    }
+    return undefined;
   }
   private setPreviewDirection(direction?: Direction) {
     if (direction === this.previewDirection) return;
@@ -195,6 +209,7 @@ class TacticalScene extends Phaser.Scene {
     if (!this.art || !this.dataModel) return;
     const m = this.dataModel, g = this.art;
     this.resetPool(); g.clear();
+    this.unitHits = [];
     const highlights = new Set(m.highlights.map(p => `${p.r}:${p.c}`));
     // 动态层：每格的高亮 / 焦点 / 落点预览（内部坐标随视角翻转）
     for (let row = 1; row <= BOARD_ROWS; row++) {
@@ -234,6 +249,7 @@ class TacticalScene extends Phaser.Scene {
       const body = friendly ? 0x1c232d : 0x241a1a;
       const inner = friendly ? 0x2c4a57 : 0x5a2f2a;
       const left = x - width / 2, top = y - height / 2;
+      this.unitHits.push({ id: u.id, x, y, w: width, h: height });
       g.fillStyle(0x000000, .35); g.fillRect(left + 3, top + 4, width, height);
       g.fillStyle(body); g.fillRect(left, top, width, height);
       g.lineStyle(1.5, color); g.strokeRect(left, top, width, height);
@@ -306,14 +322,14 @@ class TacticalScene extends Phaser.Scene {
     }
   }
 }
-export function Board({ model, onCell, onHover, onRight, onDirectionHover, onDirection }: BoardProps) {
+export function Board({ model, onCell, onHover, onHoverUnit, onRight, onDirectionHover, onDirection }: BoardProps) {
   const container = useRef<HTMLDivElement>(null), scene = useRef<TacticalScene | null>(null);
-  const current = useRef({ model, onCell, onHover, onRight, onDirectionHover, onDirection });
-  current.current = { model, onCell, onHover, onRight, onDirectionHover, onDirection };
+  const current = useRef({ model, onCell, onHover, onHoverUnit, onRight, onDirectionHover, onDirection });
+  current.current = { model, onCell, onHover, onHoverUnit, onRight, onDirectionHover, onDirection };
   useEffect(() => {
     const tactical = new TacticalScene({ key: 'tactical' });
     tactical.dataModel = current.current.model;
-    tactical.cellClick = p => current.current.onCell(p); tactical.cellHover = p => current.current.onHover(p); tactical.cellRight = () => current.current.onRight?.();
+    tactical.cellClick = p => current.current.onCell(p); tactical.cellHover = p => current.current.onHover(p); tactical.cellHoverUnit = id => current.current.onHoverUnit?.(id); tactical.cellRight = () => current.current.onRight?.();
     tactical.directionHover = direction => current.current.onDirectionHover?.(direction);
     tactical.directionSelect = direction => current.current.onDirection?.(direction);
     scene.current = tactical;
