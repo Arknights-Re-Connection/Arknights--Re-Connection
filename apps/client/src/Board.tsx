@@ -4,6 +4,26 @@ import type { CardDefinition, Direction, Position, Side, Unit } from '../../../p
 
 export const BOARD_SIZE = 820;
 const TILE = 80, PAD = 50;
+const FONT = '"Rajdhani", "Segoe UI", "Microsoft YaHei", sans-serif';
+
+// 明日方舟棋盘配色：深色近黑底 + 钢蓝网格 + 琥珀金高亮
+const C = {
+  bg: 0x0c0f13,
+  frame: 0x33404e,
+  line: 0x27313d,
+  innerLine: 0x232c37,
+  terrain: [0x12161c, 0x141920, 0x13171d, 0x151a21] as number[],
+  friendlyTile: 0x1c2a33, friendlyEdge: 0x3d5a66,
+  enemyTile: 0x2a1c1c, enemyEdge: 0x5c3a34,
+  contour: 0x1c2530,
+  friendlyHatch: 0x2e4a56, enemyHatch: 0x4a2e2a,
+  gold: 0xf0b429, goldBright: 0xffd166,
+  danger: 0xd9644a,
+  steel: 0x4d7c8a, steelDim: 0x41586a,
+  mutedText: '#5c6b7a', footer: '#4a5a68',
+  text: '#d7e0e8', textDim: '#8a94a0',
+};
+
 export interface BoardUnit extends Unit { data: CardDefinition }
 export interface BoardModel {
   viewer: Side; active: Side; turn: number; units: BoardUnit[]; selected?: string;
@@ -19,6 +39,14 @@ interface BoardProps {
   onDirection?: (direction: Direction) => void;
 }
 export function displayPosition(p: Position, viewer: Side): Position { return viewer === 'blue' ? p : { r: 10 - p.r, c: 10 - p.c }; }
+// 把鼠标屏幕坐标换算成棋盘内部坐标（含缩放比例与视角翻转），UI 拖拽与棋盘命中共用同一套换算
+export function screenToBoard(x: number, y: number, rect: DOMRect, viewer: Side): Position | undefined {
+  if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return;
+  const r = Math.floor(((y - rect.top) * BOARD_SIZE / rect.height - PAD) / TILE) + 1;
+  const c = Math.floor(((x - rect.left) * BOARD_SIZE / rect.width - PAD) / TILE) + 1;
+  if (r < 1 || r > 9 || c < 1 || c > 9) return;
+  return displayPosition({ r, c }, viewer);
+}
 
 class TacticalScene extends Phaser.Scene {
   dataModel?: BoardModel;
@@ -27,12 +55,20 @@ class TacticalScene extends Phaser.Scene {
   cellRight: () => void = () => {};
   directionHover: (direction?: Direction) => void = () => {};
   directionSelect: (direction: Direction) => void = () => {};
+  // 静态层：地形 / 网格 / 等高线 / 部署区 / 目标点，只绘制一次（与视角无关）
+  private staticArt?: Phaser.GameObjects.Graphics;
+  // 动态层：单位 / 高亮 / 焦点 / 朝向，每次 paint 清空重画
   private art?: Phaser.GameObjects.Graphics;
-  private labels: Phaser.GameObjects.Text[] = [];
+  // 动态文本对象池：复用而非每帧 destroy/recreate
+  private pool: Phaser.GameObjects.Text[] = [];
+  private poolCursor = 0;
+  private poolSizes = new Map<Phaser.GameObjects.Text, number>();
   private lastHover = '';
   private orientationGesture = false;
   private previewDirection?: Direction;
   create() {
+    this.staticArt = this.add.graphics();
+    this.drawStatic();
     this.art = this.add.graphics();
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       if (pointer.rightButtonDown()) { this.cellRight(); return; }
@@ -89,34 +125,44 @@ class TacticalScene extends Phaser.Scene {
     if (p.r < 1 || p.r > 9 || p.c < 1 || p.c > 9) return;
     return displayPosition(p, this.dataModel?.viewer ?? 'blue');
   }
-  private text(x: number, y: number, text: string, size = 13, color = '#424e3c', origin = 0.5) {
-    const label = this.add.text(x, y, text, { fontFamily: '"Segoe UI", "Microsoft YaHei", sans-serif', fontSize: size, color }).setOrigin(origin);
-    this.labels.push(label); return label;
+  private staticText(x: number, y: number, str: string, size = 13, color = C.mutedText, origin = 0.5) {
+    return this.add.text(x, y, str, { fontFamily: FONT, fontSize: size, color }).setOrigin(origin);
   }
-  paint() {
-    if (!this.art || !this.dataModel) return;
-    const m = this.dataModel, g = this.art;
-    this.labels.forEach(label => label.destroy()); this.labels = []; g.clear();
-    g.fillStyle(0xb9b7a0); g.fillRect(0, 0, BOARD_SIZE, BOARD_SIZE);
-    g.lineStyle(2, 0x69735c); g.strokeRect(PAD - 8, PAD - 8, TILE * 9 + 16, TILE * 9 + 16);
-    g.lineStyle(1, 0x6d755d, .4); g.strokeRect(14, 14, BOARD_SIZE - 28, BOARD_SIZE - 28);
-    const highlights = new Set(m.highlights.map(p => `${p.r}:${p.c}`));
+  private pooled(x: number, y: number, str: string, size = 13, color = C.mutedText, origin = 0.5) {
+    let t = this.pool[this.poolCursor];
+    if (!t) {
+      t = this.add.text(x, y, str, { fontFamily: FONT, fontSize: size, color }).setOrigin(origin);
+      this.pool.push(t); this.poolSizes.set(t, size);
+    } else {
+      t.setOrigin(origin); t.setPosition(x, y);
+      if (this.poolSizes.get(t) !== size) { t.setFontSize(size); this.poolSizes.set(t, size); }
+      t.setText(str); t.setColor(color); t.setVisible(true);
+    }
+    this.poolCursor++;
+    return t;
+  }
+  private resetPool() { for (const t of this.pool) t.setVisible(false); this.poolCursor = 0; }
+  // 静态层：背景、边框、81 格地形 + 等高线 + 部署区斜纹 + 目标点 + 行列号 + 页脚（与视角无关，只画一次）
+  private drawStatic() {
+    const g = this.staticArt!;
+    g.fillStyle(C.bg); g.fillRect(0, 0, BOARD_SIZE, BOARD_SIZE);
+    g.lineStyle(2, C.frame); g.strokeRect(PAD - 8, PAD - 8, TILE * 9 + 16, TILE * 9 + 16);
+    g.lineStyle(1, C.innerLine, .6); g.strokeRect(14, 14, BOARD_SIZE - 28, BOARD_SIZE - 28);
     for (let row = 1; row <= 9; row++) {
-      this.text(25, PAD + (row - .5) * TILE, String(row).padStart(2, '0'), 13);
-      this.text(PAD + (row - .5) * TILE, 25, String(row).padStart(2, '0'), 13);
+      this.staticText(25, PAD + (row - .5) * TILE, String(row).padStart(2, '0'), 13);
+      this.staticText(PAD + (row - .5) * TILE, 25, String(row).padStart(2, '0'), 13);
       for (let col = 1; col <= 9; col++) {
-        const internal = displayPosition({ r: row, c: col }, m.viewer);
         const x = PAD + (col - 1) * TILE, y = PAD + (row - 1) * TILE;
         const friendlyDeploy = (row === 9 && col >= 3 && col <= 7) || (row === 8 && col >= 4 && col <= 6);
         const enemyDeploy = (row === 1 && col >= 3 && col <= 7) || (row === 2 && col >= 4 && col <= 6);
         const isTarget = (row === 1 || row === 9) && col === 5;
-        const terrain = [0x9aa28c, 0x969e89, 0x9ca48f, 0x959f8c][(row * 13 + col * 17) % 4];
-        g.fillStyle(friendlyDeploy ? 0x879879 : enemyDeploy ? 0xa1917a : terrain);
+        const terrain = C.terrain[(row * 13 + col * 17) % 4];
+        g.fillStyle(friendlyDeploy ? C.friendlyTile : enemyDeploy ? C.enemyTile : terrain);
         g.fillRect(x + 1, y + 1, TILE - 2, TILE - 2);
-        g.lineStyle(1, friendlyDeploy ? 0x657754 : enemyDeploy ? 0x88795f : 0x6d795f, .65);
+        g.lineStyle(1, friendlyDeploy ? C.friendlyEdge : enemyDeploy ? C.enemyEdge : C.line, .7);
         g.strokeRect(x + 1, y + 1, TILE - 2, TILE - 2);
-        // Faint contour hatching gives the fixed grid the material of a printed operations map.
-        g.lineStyle(1, 0x56654d, .12);
+        // 细密等高线纹理，模拟打印作战地图的质感
+        g.lineStyle(1, C.contour, .14);
         for (let contour = 0; contour < 3; contour++) {
           const offset = (row * 9 + col * 7 + contour * 16) % 48;
           g.lineBetween(x + 7, y + 14 + offset, x + 28, y + 7 + offset);
@@ -124,35 +170,52 @@ class TacticalScene extends Phaser.Scene {
           g.lineBetween(x + 53, y + 14 + offset, x + 73, y + 8 + offset);
         }
         if (friendlyDeploy || enemyDeploy) {
-          g.lineStyle(1, friendlyDeploy ? 0x495f3c : 0x805c43, .4);
+          g.lineStyle(1, friendlyDeploy ? C.friendlyHatch : C.enemyHatch, .4);
           for (let k = 10; k < 70; k += 14) g.lineBetween(x + k, y + 66, x + k + 10, y + 76);
         }
         if (isTarget) {
-          const color = row === 9 ? 0x4d6340 : 0x82583f;
-          g.fillStyle(0xc5c2a2, .8); g.fillRect(x + 12, y + 10, 56, 56);
-          g.lineStyle(2, color, .9); g.strokeRect(x + 14, y + 12, 52, 52);
-          g.lineBetween(x + 26, y + 44, x + 40, y + 30); g.lineBetween(x + 40, y + 30, x + 54, y + 44);
-          g.lineBetween(x + 29, y + 41, x + 29, y + 54); g.lineBetween(x + 51, y + 41, x + 51, y + 54);
-          this.text(x + 40, y + 72, row === 9 ? '我方目标' : '敌方目标', 11, row === 9 ? '#3e5531' : '#744731');
-        }
-        if (highlights.has(`${internal.r}:${internal.c}`)) {
-          const attack = m.kind === 'attack' || m.kind === 'command-enemy';
-          const color = attack ? 0xa64f33 : 0xecd279;
-          g.fillStyle(color, .2); g.fillRect(x + 3, y + 3, TILE - 6, TILE - 6);
-          g.lineStyle(2, color, .85); g.strokeRect(x + 4, y + 4, TILE - 8, TILE - 8);
-          const cost = m.costs[`${internal.r}:${internal.c}`];
-          if (cost !== undefined) this.text(x + 65, y + 12, String(cost) + '◇', 12, '#34472b');
-        }
-        if (m.focused && m.focused.r === internal.r && m.focused.c === internal.c) {
-          g.lineStyle(2, 0xf7e7ba, .9); g.strokeRect(x + 5, y + 5, TILE - 10, TILE - 10);
-        }
-        if (m.dropHover && m.dropHover.r === internal.r && m.dropHover.c === internal.c) {
-          g.fillStyle(0x8de3b3, .28); g.fillRect(x + 3, y + 3, TILE - 6, TILE - 6);
-          g.lineStyle(4, 0xb2ffd2, .98); g.strokeRect(x + 4, y + 4, TILE - 8, TILE - 8);
-          g.lineStyle(1, 0xf3ffe9, .85); g.strokeRect(x + 9, y + 9, TILE - 18, TILE - 18);
+          const color = row === 9 ? C.gold : C.danger;
+          g.fillStyle(C.gold, .5); g.fillRect(x + 12, y + 10, 56, 56);
+          g.lineStyle(2, color, .95); g.strokeRect(x + 14, y + 12, 52, 52);
+          // 菱形目标标记
+          g.fillStyle(C.gold, .9);
+          g.fillTriangle(x + 40, y + 22, x + 54, y + 38, x + 40, y + 54);
+          g.fillTriangle(x + 40, y + 22, x + 26, y + 38, x + 40, y + 54);
+          this.staticText(x + 40, y + 72, row === 9 ? '我方目标' : '敌方目标', 11, row === 9 ? '#f0b429' : '#d9644a');
         }
       }
     }
+    this.staticText(BOARD_SIZE / 2, BOARD_SIZE - 17, 'RHODES ISLAND  /  OPERATIONS MAP 09', 10, C.footer);
+  }
+  paint() {
+    if (!this.art || !this.dataModel) return;
+    const m = this.dataModel, g = this.art;
+    this.resetPool(); g.clear();
+    const highlights = new Set(m.highlights.map(p => `${p.r}:${p.c}`));
+    // 动态层：每格的高亮 / 焦点 / 落点预览（内部坐标随视角翻转）
+    for (let row = 1; row <= 9; row++) {
+      for (let col = 1; col <= 9; col++) {
+        const internal = displayPosition({ r: row, c: col }, m.viewer);
+        const x = PAD + (col - 1) * TILE, y = PAD + (row - 1) * TILE;
+        if (highlights.has(`${internal.r}:${internal.c}`)) {
+          const attack = m.kind === 'attack' || m.kind === 'command-enemy';
+          const color = attack ? C.danger : C.gold;
+          g.fillStyle(color, .2); g.fillRect(x + 3, y + 3, TILE - 6, TILE - 6);
+          g.lineStyle(2, color, .85); g.strokeRect(x + 4, y + 4, TILE - 8, TILE - 8);
+          const cost = m.costs[`${internal.r}:${internal.c}`];
+          if (cost !== undefined) this.pooled(x + 65, y + 12, String(cost) + '◇', 12, '#ffd166');
+        }
+        if (m.focused && m.focused.r === internal.r && m.focused.c === internal.c) {
+          g.lineStyle(2, C.goldBright, .9); g.strokeRect(x + 5, y + 5, TILE - 10, TILE - 10);
+        }
+        if (m.dropHover && m.dropHover.r === internal.r && m.dropHover.c === internal.c) {
+          g.fillStyle(C.gold, .26); g.fillRect(x + 3, y + 3, TILE - 6, TILE - 6);
+          g.lineStyle(4, C.goldBright, .98); g.strokeRect(x + 4, y + 4, TILE - 8, TILE - 8);
+          g.lineStyle(1, 0xfff4d6, .85); g.strokeRect(x + 9, y + 9, TILE - 18, TILE - 18);
+        }
+      }
+    }
+    // 单位棋子
     const counts = new Map<string, number>();
     for (const u of m.units) {
       const p = displayPosition(u, m.viewer), key = `${p.r}:${p.c}:${u.owner}`;
@@ -163,33 +226,35 @@ class TacticalScene extends Phaser.Scene {
       if (hasEnemy) { x += friendly ? -18 : 18; y += index * 5 - 2; }
       else { x += index * 6 - Math.min(counts.get(key)! - 1, 2) * 2; y += index * 5 - 2; }
       const width = hasEnemy ? 32 : 48, height = 62;
-      const color = friendly ? 0x536b42 : 0x856044;
+      const color = friendly ? C.steel : C.danger;
+      const body = friendly ? 0x1c232d : 0x241a1a;
+      const inner = friendly ? 0x2c4a57 : 0x5a2f2a;
       const left = x - width / 2, top = y - height / 2;
-      g.fillStyle(0x292b20, .3); g.fillRect(left + 3, top + 4, width, height);
-      g.fillStyle(friendly ? 0xd8d3b3 : 0xcebc9e); g.fillRect(left, top, width, height);
+      g.fillStyle(0x000000, .35); g.fillRect(left + 3, top + 4, width, height);
+      g.fillStyle(body); g.fillRect(left, top, width, height);
       g.lineStyle(1.5, color); g.strokeRect(left, top, width, height);
-      g.fillStyle(friendly ? 0x808f75 : 0x918475); g.fillRect(left + 3, top + 3, width - 6, 34);
-      // The tabletop token is a small operator card, with printed portrait and live combat values.
-      g.fillStyle(0x303f38, .65); g.fillTriangle(x - 11, top + 33, x, top + 15, x + 11, top + 33);
-      g.fillStyle(0xc9bba0); g.fillCircle(x, top + 13, 5);
-      g.fillStyle(0x35433b); g.fillRect(x - 5, top + 7, 10, 4);
-      g.fillStyle(0xc4b47e); g.fillTriangle(x - 6, top + 19, x, top + 24, x + 6, top + 19);
-      this.text(x, top + 43, u.data.name, hasEnemy ? 8 : 11, '#31432d');
+      g.fillStyle(inner); g.fillRect(left + 3, top + 3, width - 6, 34);
+      // 干员小卡 token：暗色卡面 + 头像 + 实时攻防数值
+      g.fillStyle(0x141920, .65); g.fillTriangle(x - 11, top + 33, x, top + 15, x + 11, top + 33);
+      g.fillStyle(0x2e3844); g.fillCircle(x, top + 13, 5);
+      g.fillStyle(0x1a222b); g.fillRect(x - 5, top + 7, 10, 4);
+      g.fillStyle(C.gold); g.fillTriangle(x - 6, top + 19, x, top + 24, x + 6, top + 19);
+      this.pooled(x, top + 43, u.data.name, hasEnemy ? 8 : 11, C.text);
       const badge = hasEnemy ? 12 : 15;
-      g.fillStyle(0x415336); g.fillRect(left + 2, top + 48, badge, 12);
-      g.fillStyle(0x704b34); g.fillRect(left + width - badge - 2, top + 48, badge, 12);
-      this.text(left + 2 + badge / 2, top + 54, String(u.data.power), 10, '#efe7c9');
-      this.text(left + width - badge / 2 - 2, top + 54, String(u.hp), 10, '#efe7c9');
-      if (m.selected === u.id) { g.lineStyle(2.5, 0xf1d17e); g.strokeRect(left - 3, top - 3, width + 6, height + 6); }
+      g.fillStyle(C.gold); g.fillRect(left + 2, top + 48, badge, 12);
+      g.fillStyle(C.steelDim); g.fillRect(left + width - badge - 2, top + 48, badge, 12);
+      this.pooled(left + 2 + badge / 2, top + 54, String(u.data.power), 10, '#16130a');
+      this.pooled(left + width - badge / 2 - 2, top + 54, String(u.hp), 10, '#ffffff');
+      if (m.selected === u.id) { g.lineStyle(2.5, C.goldBright); g.strokeRect(left - 3, top - 3, width + 6, height + 6); }
       const displayedDirection = m.viewer === 'blue' ? u.direction : (u.direction + 2) % 4;
       const vector = [[0, -1], [1, 0], [0, 1], [-1, 0]][displayedDirection];
       const directionX = x + vector[0] * (width / 2 + 4), directionY = y + vector[1] * 35;
       g.fillStyle(color); g.fillCircle(directionX, directionY, 2.5);
       g.lineStyle(2, color); g.lineBetween(directionX, directionY, directionX + vector[0] * 5, directionY + vector[1] * 5);
       const badges = [u.skillActive ? '技' : '', u.frozenUntil >= m.turn ? '冻' : '', u.cold ? `寒${u.cold}` : '', u.smoke ? '烟' : '', u.nerve ? '神' : ''].filter(Boolean);
-      if (badges.length) { g.fillStyle(0x31432c); g.fillRect(left - 2, top - 11, width + 4, 10); this.text(x, top - 6, badges.join('·'), 9, '#f0db9e'); }
+      if (badges.length) { g.fillStyle(0x1a2028); g.fillRect(left - 2, top - 11, width + 4, 10); this.pooled(x, top - 6, badges.join('·'), 9, '#f0b429'); }
     }
-    this.text(BOARD_SIZE / 2, BOARD_SIZE - 17, 'RHODES ISLAND  /  OPERATIONS MAP 09', 10, '#647254');
+    // 部署朝向选择覆盖层
     if (m.dropPick) {
       const center = displayPosition(m.dropPick, m.viewer);
       const internalDirection = m.dropDirection ?? (m.active === 'blue' ? 0 : 2);
@@ -200,32 +265,32 @@ class TacticalScene extends Phaser.Scene {
         if (rr < 1 || rr > 9 || cc < 1 || cc > 9) continue;
         const direction = dr < 0 ? 0 : dc > 0 ? 1 : dr > 0 ? 2 : dc < 0 ? 3 : undefined;
         const activeDirection = direction !== undefined && direction === screenDirection;
-        g.fillStyle(activeDirection ? 0xf2d276 : 0xf1d17e, activeDirection ? .55 : .26);
+        g.fillStyle(activeDirection ? C.gold : C.gold, activeDirection ? .55 : .24);
         g.fillRect(PAD + (cc - 1) * TILE + 2, PAD + (rr - 1) * TILE + 2, TILE - 4, TILE - 4);
-        g.lineStyle(activeDirection ? 4 : 2, activeDirection ? 0xffe7a0 : 0xf1d17e, activeDirection ? 1 : .75);
+        g.lineStyle(activeDirection ? 4 : 2, activeDirection ? C.goldBright : C.gold, activeDirection ? 1 : .75);
         g.strokeRect(PAD + (cc - 1) * TILE + 3, PAD + (rr - 1) * TILE + 3, TILE - 6, TILE - 6);
       }
       if (screenDirection !== undefined) {
         const vector = [[0, -1], [1, 0], [0, 1], [-1, 0]][screenDirection];
-        g.lineStyle(5, 0xffe7a0, .95);
+        g.lineStyle(5, C.goldBright, .95);
         g.lineBetween(cx, cy - vector[1] * 2, cx + vector[0] * 43, cy + vector[1] * 43);
-        g.fillStyle(0xffe7a0, 1);
+        g.fillStyle(C.goldBright, 1);
         g.fillTriangle(
           cx + vector[0] * 55, cy + vector[1] * 55,
           cx + vector[0] * 35 - vector[1] * 10, cy + vector[1] * 35 + vector[0] * 10,
           cx + vector[0] * 35 + vector[1] * 10, cy + vector[1] * 35 - vector[0] * 10,
         );
       }
-      g.fillStyle(0x1e3027, .88); g.fillCircle(cx, cy, 19);
-      g.lineStyle(3, 0xf0d27a, .98); g.strokeCircle(cx, cy, 19);
-      g.lineStyle(1, 0xfff1bf, .9); g.strokeCircle(cx, cy, 14);
-      g.fillStyle(0xe8d38c, 1);
+      g.fillStyle(0x0c0f13, .9); g.fillCircle(cx, cy, 19);
+      g.lineStyle(3, C.gold, .98); g.strokeCircle(cx, cy, 19);
+      g.lineStyle(1, C.goldBright, .9); g.strokeCircle(cx, cy, 14);
+      g.fillStyle(C.gold, 1);
       g.fillTriangle(cx, cy - 10, cx + 7, cy + 5, cx, cy + 2);
       g.fillTriangle(cx, cy - 10, cx - 7, cy + 5, cx, cy + 2);
-      g.fillStyle(0xf5eed4, .95); g.fillCircle(cx, cy + 8, 3);
-      g.lineStyle(1, 0xf5eed4, .8);
+      g.fillStyle(0xfff4d6, .95); g.fillCircle(cx, cy + 8, 3);
+      g.lineStyle(1, 0xfff4d6, .8);
       g.lineBetween(cx - 7, cy + 13, cx + 7, cy + 13);
-      g.fillStyle(0x33422c); g.lineStyle(3, 0x33422c, 1);
+      g.fillStyle(C.gold); g.lineStyle(3, C.gold, 1);
       for (const [dr, dc] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as Array<[number, number]>) {
         const rr = center.r + dr, cc = center.c + dc;
         if (rr < 1 || rr > 9 || cc < 1 || cc > 9) continue;
@@ -249,7 +314,7 @@ export function Board({ model, onCell, onHover, onRight, onDirectionHover, onDir
     tactical.directionSelect = direction => current.current.onDirection?.(direction);
     scene.current = tactical;
     const game = new Phaser.Game({ type: Phaser.CANVAS, width: BOARD_SIZE, height: BOARD_SIZE, parent: container.current!,
-      backgroundColor: '#b9b7a0', scene: tactical, render: { antialias: true }, audio: { noAudio: true },
+      backgroundColor: '#0c0f13', scene: tactical, render: { antialias: true }, audio: { noAudio: true },
       scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH } });
     return () => { game.destroy(true); scene.current = null; };
   }, []);

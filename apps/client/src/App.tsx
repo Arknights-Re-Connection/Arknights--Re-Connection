@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { catalog, defaultDeck, definitions, validateDeck } from '../../../packages/content';
 import { actionCost, applyAction, attackRange, blocked, canEnter, createGame, damageValue, definition,
-  deploymentArea, elementName, frozen, getView, inRange, legalMoves, loadGame, moveCost, other, sideName, unitsAt } from '../../../packages/rules/engine';
+  deploymentArea, elementName, frozen, getView, inRange, isDeployment, legalMoves, loadGame, moveCost, other, sideName, unitsAt } from '../../../packages/rules/engine';
 import type { Action, CardInstance, Direction, GameState, Position, Side, Unit } from '../../../packages/rules/types';
-import { Board, displayPosition } from './Board';
+import { Board, displayPosition, screenToBoard } from './Board';
 import type { BoardModel } from './Board';
 import { readSave, saveGame } from './storage';
 import { CardArt } from './OperatorArt';
@@ -25,9 +25,10 @@ function HandCardFace({ data, cost }: { data: (typeof definitions)[number]; cost
 
 function Mark({ small = false }: { small?: boolean }) {
   return <svg className={small ? 'brand-mark small' : 'brand-mark'} viewBox="0 0 60 60" fill="none" aria-hidden="true">
-    <path d="M30 4 56 49H4L30 4Z" stroke="currentColor" strokeWidth="3" />
-    <path d="m30 18 15 26H15l15-26Z" fill="currentColor" opacity=".28" />
-    <path d="M30 31v19M20 42h20" stroke="currentColor" strokeWidth="2" />
+    <path d="M30 4 55 30 30 56 5 30Z" stroke="currentColor" strokeWidth="3" />
+    <path d="M30 15 43 30 30 45 17 30Z" fill="currentColor" opacity=".18" />
+    <path d="M30 4v11M30 45v11M5 30h11M44 30h11" stroke="currentColor" strokeWidth="2" />
+    <circle cx="30" cy="30" r="4.5" fill="currentColor" />
   </svg>;
 }
 function Modal({ title, children, onClose, wide = false }: { title: string; children: React.ReactNode; onClose?: () => void; wide?: boolean }) {
@@ -72,7 +73,7 @@ export function App() {
   const mapRef = useRef<HTMLElement | null>(null);
   const handRef = useRef<HTMLDivElement | null>(null);
   const handLayout = useRef<Map<string, DOMRect> | undefined>(undefined);
-  const pointerDrag = useRef<{ pointerId: number; cardId: string; startX: number; startY: number; dragging: boolean } | undefined>(undefined);
+  const pointerDrag = useRef<{ pointerId: number; cardId: string; startX: number; startY: number; dragging: boolean; element?: HTMLElement } | undefined>(undefined);
   const suppressClick = useRef(false);
   const lastSaved = useRef<number | undefined>(undefined);
   useLayoutEffect(() => {
@@ -86,9 +87,12 @@ export function App() {
       const after = element.getBoundingClientRect();
       const dx = before.left - after.left, dy = before.top - after.top;
       if (Math.abs(dx) + Math.abs(dy) > 1) {
-        element.animate([{ translate: `${dx}px ${dy}px` }, { translate: '0 0' }], {
+        // 回位动画期间禁用指针事件，避免正在归位的卡牌遮挡并拦截紧随其后的落点方向选择。
+        element.style.pointerEvents = 'none';
+        const animation = element.animate([{ translate: `${dx}px ${dy}px` }, { translate: '0 0' }], {
           duration: 320, easing: 'cubic-bezier(.2,.8,.2,1)',
         });
+        animation.onfinish = () => { element.style.pointerEvents = ''; };
       }
     }
   }, [draggedCard?.cardId]);
@@ -100,7 +104,7 @@ export function App() {
   }, [game]);
   useEffect(() => { if (toast) { const timer = setTimeout(() => setToast(undefined), 4500); return () => clearTimeout(timer); } }, [toast]);
   useEffect(() => {
-    const cancel = (e: KeyboardEvent) => { if (e.key === 'Escape') { setPending(undefined); setPanel(undefined); setIntent('inspect'); setSelected(undefined); setDropPick(undefined); setDraggedCard(undefined); pointerDrag.current = undefined; } };
+    const cancel = (e: KeyboardEvent) => { if (e.key === 'Escape') { setPending(undefined); setPanel(undefined); setIntent('inspect'); setSelected(undefined); setDropPick(undefined); setDraggedCard(undefined); releaseDrag(); } };
     window.addEventListener('keydown', cancel); return () => window.removeEventListener('keydown', cancel);
   }, []);
   const view = useMemo(() => game ? getView(game, viewer) : undefined, [game, viewer]);
@@ -189,16 +193,15 @@ export function App() {
     if (!card || card.owner !== viewer || card.zone !== 'hand') return;
     const canvas = mapRef.current?.querySelector('canvas'); if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return;
-    const p = displayPosition({ r: Math.floor(((y - rect.top) * 820 / rect.height - 50) / 80) + 1,
-      c: Math.floor(((x - rect.left) * 820 / rect.width - 50) / 80) + 1 }, viewer);
+    const p = screenToBoard(x, y, rect, viewer);
+    if (!p) return;
     const d = catalog[card.definition];
     setSelected(id); setDropPick(undefined);
     if (d.kind === 'operator') {
       // 拖拽部署：跳过确认弹窗，直接进入 5 格方向选择
       if (game.players[viewer].deployed >= 2) { setToast('本回合已部署两次'); return; }
       if (card.cost > game.players[viewer].cp) { setToast('指挥点不足，无法部署'); return; }
-      if (!deploymentArea(viewer).some(x => x.r === p.r && x.c === p.c) || !canEnter(game, p, viewer)) { setToast('只能部署在己方部署区的空余格子'); return; }
+      if (!isDeployment(viewer, p) || !canEnter(game, p, viewer)) { setToast('只能部署在己方部署区的空余格子'); return; }
       setIntent('deploy'); setDropPick({ cardId: id, position: p });
     } else if (d.target === 'global') requestCommand(card);
     else {
@@ -217,17 +220,19 @@ export function App() {
   function mapPositionAt(x: number, y: number): Position | undefined {
     const canvas = mapRef.current?.querySelector('canvas');
     if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return;
-    const r = Math.floor(((y - rect.top) * 820 / rect.height - 50) / 80) + 1;
-    const c = Math.floor(((x - rect.left) * 820 / rect.width - 50) / 80) + 1;
-    if (r < 1 || r > 9 || c < 1 || c > 9) return;
-    return displayPosition({ r, c }, viewer);
+    return screenToBoard(x, y, canvas.getBoundingClientRect(), viewer);
   }
   function startCardDrag(card: CardInstance, e: React.PointerEvent<HTMLButtonElement>) {
     if (!active || !game || game.phase !== 'action' || e.button !== 0) return;
-    pointerDrag.current = { pointerId: e.pointerId, cardId: card.id, startX: e.clientX, startY: e.clientY, dragging: false };
+    pointerDrag.current = { pointerId: e.pointerId, cardId: card.id, startX: e.clientX, startY: e.clientY, dragging: false, element: e.currentTarget };
     e.currentTarget.setPointerCapture(e.pointerId);
+  }
+  function releaseDrag() {
+    const drag = pointerDrag.current;
+    if (drag?.element && drag.dragging && drag.element.hasPointerCapture(drag.pointerId)) {
+      drag.element.releasePointerCapture(drag.pointerId);
+    }
+    pointerDrag.current = undefined;
   }
   function moveCardDrag(card: CardInstance, e: React.PointerEvent<HTMLButtonElement>) {
     const drag = pointerDrag.current;
@@ -245,6 +250,11 @@ export function App() {
     const drag = pointerDrag.current;
     if (!drag || drag.pointerId !== e.pointerId) return;
     pointerDrag.current = undefined;
+    // 显式释放指针捕获：pointerup 处理期间 releasePointerCapture 在部分浏览器环境下会被忽略，
+    // 这里同步 + 宏任务兜底各释放一次，避免下一次指针交互（落点方向选择）仍被手牌按钮捕获。
+    const el = drag.element, pid = drag.pointerId;
+    if (el?.hasPointerCapture(pid)) { try { el.releasePointerCapture(pid); } catch { /* noop */ } }
+    setTimeout(() => { if (el?.hasPointerCapture(pid)) { try { el.releasePointerCapture(pid); } catch { /* noop */ } } }, 0);
     if (!drag.dragging) return;
     e.preventDefault();
     suppressClick.current = true;
@@ -254,7 +264,7 @@ export function App() {
   }
   function cancelCardDrag(e: React.PointerEvent<HTMLButtonElement>) {
     if (pointerDrag.current?.pointerId !== e.pointerId) return;
-    pointerDrag.current = undefined;
+    releaseDrag();
     setDraggedCard(undefined);
   }
   function canDropCard(card: CardInstance, position: Position) {
@@ -262,7 +272,7 @@ export function App() {
     const definition = catalog[card.definition];
     if (definition.kind === 'operator') {
       return game.players[viewer].deployed < 2 && card.cost <= game.players[viewer].cp &&
-        deploymentArea(viewer).some(cell => cell.r === position.r && cell.c === position.c) &&
+        isDeployment(viewer, position) &&
         canEnter(game, position, viewer);
     }
     return definition.target === 'global' || unitsAt(game, position).some(target =>
@@ -311,7 +321,7 @@ export function App() {
     <h3>原型边界</h3><p>当前卡牌与原创矢量插画为测试内容。无正式卡池、AI、联机及反制卡；支持本机轮流对局和预设演练。灼燃保留“再次爆发变 3 点”，免疫期间基础元素仍为 1。双方各二十回合后依次比得分、指挥点上限。</p>
   </div>;
 
-  return   <div className={`app ${viewer} page-${page}`} onContextMenu={e => { e.preventDefault(); setPending(undefined); setIntent('inspect'); setSelected(undefined); setDropPick(undefined); setDraggedCard(undefined); }}>
+  return   <div className={`app ${viewer} page-${page}`} onContextMenu={e => { e.preventDefault(); setPending(undefined); setIntent('inspect'); setSelected(undefined); setDropPick(undefined); setDraggedCard(undefined); releaseDrag(); }}>
     <header className="topbar"><button className="brand" onClick={() => { setPage('home'); setPanel(undefined); }}><Mark small /><span>RE:CONNECTION<small>明日方舟 — 再连接</small></span></button>
       <span className="build-badge"><i /> 战术牌桌 <b>0.2</b></span>
       <nav><button onClick={() => setPanel('rules')}>规则手册</button><button onClick={() => setPanel('settings')}>设置</button>
@@ -341,7 +351,7 @@ export function App() {
           {game && <button className="link-button" onClick={() => setPage('battle')}>返回当前对局 →</button>}
         </div>
         <div className="prototype-note">
-          <span className="note-badge">FIELD MANUAL · 02</span>
+          <span className="note-badge">OPERATIONS · 02</span>
           <p>本机双人 · 9×9 战场 · 30 张构筑<br />先进入战术演练，熟悉部署与突破防线。</p>
         </div>
       </div>
@@ -424,7 +434,7 @@ export function App() {
           <div className="map-bottomline"><span>{dropPick ? '拖出中心标记确定朝向 · 点击周围箭头也可确认' : intent === 'deploy' ? '选择部署区与朝向' : intent === 'move' ? '选择落点与朝向' : intent === 'attack' ? '选择敌方干员' : intent === 'heal' ? '选择受伤的己方干员' : intent === 'command' ? '选择指令目标' : '左键选择 · 右键取消 · Esc 返回'}</span>
             {intent !== 'inspect' && <button onClick={() => { setIntent('inspect'); setSelected(undefined); setDropPick(undefined); }}>取消选择 ×</button>}</div></section>
         <aside className="operation-right">
-          <div className="section-label">干员档案 <span>FIELD DOSSIER</span></div>
+          <div className="section-label">干员档案 <span>OPERATOR FILE</span></div>
           <div className="detail-scroll">
             <div className="dossier-entry" key={shown ?? 'empty'}>
             {data && selectedCard ? <>

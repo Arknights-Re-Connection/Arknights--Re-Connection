@@ -5,5 +5,12 @@ export default defineConfig({
   root: 'apps/client',
   plugins: [react()],
   server: { port: 5173, strictPort: true },
-  build: { outDir: '../../dist', emptyOutDir: true, chunkSizeWarningLimit: 1600 },
+  build: {
+    outDir: '../../dist', emptyOutDir: true, chunkSizeWarningLimit: 1600,
+    rollupOptions: {
+      output: {
+        manualChunks(id) { if (id.includes('node_modules/phaser')) return 'phaser'; },
+      },
+    },
+  },
 });
