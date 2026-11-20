@@ -17,10 +17,10 @@ page.on('response', response => { if (response.status() >= 400) errors.push(`HTT
 let exportIndex = 0;
 async function check(name, work) { await work(); checks.push(name); console.log(`PASS ${name}`); }
 async function cell(r, c, viewer = 'blue') {
-  if (viewer === 'red') { r = 10 - r; c = 10 - c; }
+  if (viewer === 'red') { r = 10 - r; c = 8 - c; }
   const rect = await page.locator('canvas').boundingBox();
   assert.ok(rect);
-  await page.mouse.click(rect.x + (50 + (c - .5) * 80) / 820 * rect.width, rect.y + (50 + (r - .5) * 80) / 820 * rect.height);
+  await page.mouse.click(rect.x + (50 + (c - .5) * 80) / 660 * rect.width, rect.y + (50 + (r - .5) * 80) / 820 * rect.height);
 }
 async function confirm() {
   const button = page.getByRole('button', { name: '确认执行', exact: true });
@@ -242,7 +242,7 @@ try {
     await page.mouse.up();
     await page.locator('.board-canvas.aiming').waitFor();
     const point = (r, c) => ({
-      x: canvas.x + (50 + (c - .5) * 80) / 820 * canvas.width,
+      x: canvas.x + (50 + (c - .5) * 80) / 660 * canvas.width,
       y: canvas.y + (50 + (r - .5) * 80) / 820 * canvas.height,
     });
     const placement = point(8, 5);

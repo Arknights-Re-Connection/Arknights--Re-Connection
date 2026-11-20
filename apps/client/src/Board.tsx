@@ -1,9 +1,11 @@
 import { useEffect, useRef } from 'react';
 import Phaser from 'phaser';
 import type { CardDefinition, Direction, Position, Side, Unit } from '../../../packages/rules/types';
+import { BOARD_ROWS, BOARD_COLS } from '../../../packages/rules/engine';
 
-export const BOARD_SIZE = 820;
-const TILE = 80, PAD = 50;
+export const TILE = 80, PAD = 50;
+export const BOARD_W = PAD * 2 + BOARD_COLS * TILE; // 660
+export const BOARD_H = PAD * 2 + BOARD_ROWS * TILE; // 820
 const FONT = '"Rajdhani", "Segoe UI", "Microsoft YaHei", sans-serif';
 
 // 明日方舟棋盘配色：深色近黑底 + 钢蓝网格 + 琥珀金高亮
@@ -38,13 +40,13 @@ interface BoardProps {
   onDirectionHover?: (direction?: Direction) => void;
   onDirection?: (direction: Direction) => void;
 }
-export function displayPosition(p: Position, viewer: Side): Position { return viewer === 'blue' ? p : { r: 10 - p.r, c: 10 - p.c }; }
+export function displayPosition(p: Position, viewer: Side): Position { return viewer === 'blue' ? p : { r: BOARD_ROWS + 1 - p.r, c: BOARD_COLS + 1 - p.c }; }
 // 把鼠标屏幕坐标换算成棋盘内部坐标（含缩放比例与视角翻转），UI 拖拽与棋盘命中共用同一套换算
 export function screenToBoard(x: number, y: number, rect: DOMRect, viewer: Side): Position | undefined {
   if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return;
-  const r = Math.floor(((y - rect.top) * BOARD_SIZE / rect.height - PAD) / TILE) + 1;
-  const c = Math.floor(((x - rect.left) * BOARD_SIZE / rect.width - PAD) / TILE) + 1;
-  if (r < 1 || r > 9 || c < 1 || c > 9) return;
+  const r = Math.floor(((y - rect.top) * BOARD_H / rect.height - PAD) / TILE) + 1;
+  const c = Math.floor(((x - rect.left) * BOARD_W / rect.width - PAD) / TILE) + 1;
+  if (r < 1 || r > BOARD_ROWS || c < 1 || c > BOARD_COLS) return;
   return displayPosition({ r, c }, viewer);
 }
 
@@ -122,7 +124,7 @@ class TacticalScene extends Phaser.Scene {
   }
   private position(x: number, y: number): Position | undefined {
     const p = { r: Math.floor((y - PAD) / TILE) + 1, c: Math.floor((x - PAD) / TILE) + 1 };
-    if (p.r < 1 || p.r > 9 || p.c < 1 || p.c > 9) return;
+    if (p.r < 1 || p.r > BOARD_ROWS || p.c < 1 || p.c > BOARD_COLS) return;
     return displayPosition(p, this.dataModel?.viewer ?? 'blue');
   }
   private staticText(x: number, y: number, str: string, size = 13, color = C.mutedText, origin = 0.5) {
@@ -145,17 +147,19 @@ class TacticalScene extends Phaser.Scene {
   // 静态层：背景、边框、81 格地形 + 等高线 + 部署区斜纹 + 目标点 + 行列号 + 页脚（与视角无关，只画一次）
   private drawStatic() {
     const g = this.staticArt!;
-    g.fillStyle(C.bg); g.fillRect(0, 0, BOARD_SIZE, BOARD_SIZE);
-    g.lineStyle(2, C.frame); g.strokeRect(PAD - 8, PAD - 8, TILE * 9 + 16, TILE * 9 + 16);
-    g.lineStyle(1, C.innerLine, .6); g.strokeRect(14, 14, BOARD_SIZE - 28, BOARD_SIZE - 28);
-    for (let row = 1; row <= 9; row++) {
+    g.fillStyle(C.bg); g.fillRect(0, 0, BOARD_W, BOARD_H);
+    g.lineStyle(2, C.frame); g.strokeRect(PAD - 8, PAD - 8, TILE * BOARD_COLS + 16, TILE * BOARD_ROWS + 16);
+    g.lineStyle(1, C.innerLine, .6); g.strokeRect(14, 14, BOARD_W - 28, BOARD_H - 28);
+    for (let row = 1; row <= BOARD_ROWS; row++)
       this.staticText(25, PAD + (row - .5) * TILE, String(row).padStart(2, '0'), 13);
-      this.staticText(PAD + (row - .5) * TILE, 25, String(row).padStart(2, '0'), 13);
-      for (let col = 1; col <= 9; col++) {
+    for (let col = 1; col <= BOARD_COLS; col++)
+      this.staticText(PAD + (col - .5) * TILE, 25, String(col).padStart(2, '0'), 13);
+    for (let row = 1; row <= BOARD_ROWS; row++) {
+      for (let col = 1; col <= BOARD_COLS; col++) {
         const x = PAD + (col - 1) * TILE, y = PAD + (row - 1) * TILE;
-        const friendlyDeploy = (row === 9 && col >= 3 && col <= 7) || (row === 8 && col >= 4 && col <= 6);
-        const enemyDeploy = (row === 1 && col >= 3 && col <= 7) || (row === 2 && col >= 4 && col <= 6);
-        const isTarget = (row === 1 || row === 9) && col === 5;
+        const friendlyDeploy = (row === 9 && col >= 2 && col <= 6) || (row === 8 && col >= 3 && col <= 5);
+        const enemyDeploy = (row === 1 && col >= 2 && col <= 6) || (row === 2 && col >= 3 && col <= 5);
+        const isTarget = (row === 1 || row === 9) && col === 4;
         const terrain = C.terrain[(row * 13 + col * 17) % 4];
         g.fillStyle(friendlyDeploy ? C.friendlyTile : enemyDeploy ? C.enemyTile : terrain);
         g.fillRect(x + 1, y + 1, TILE - 2, TILE - 2);
@@ -185,7 +189,7 @@ class TacticalScene extends Phaser.Scene {
         }
       }
     }
-    this.staticText(BOARD_SIZE / 2, BOARD_SIZE - 17, 'RHODES ISLAND  /  OPERATIONS MAP 09', 10, C.footer);
+    this.staticText(BOARD_W / 2, BOARD_H - 17, 'RHODES ISLAND  /  OPERATIONS MAP 07', 10, C.footer);
   }
   paint() {
     if (!this.art || !this.dataModel) return;
@@ -193,8 +197,8 @@ class TacticalScene extends Phaser.Scene {
     this.resetPool(); g.clear();
     const highlights = new Set(m.highlights.map(p => `${p.r}:${p.c}`));
     // 动态层：每格的高亮 / 焦点 / 落点预览（内部坐标随视角翻转）
-    for (let row = 1; row <= 9; row++) {
-      for (let col = 1; col <= 9; col++) {
+    for (let row = 1; row <= BOARD_ROWS; row++) {
+      for (let col = 1; col <= BOARD_COLS; col++) {
         const internal = displayPosition({ r: row, c: col }, m.viewer);
         const x = PAD + (col - 1) * TILE, y = PAD + (row - 1) * TILE;
         if (highlights.has(`${internal.r}:${internal.c}`)) {
@@ -262,7 +266,7 @@ class TacticalScene extends Phaser.Scene {
       const cx = PAD + (center.c - .5) * TILE, cy = PAD + (center.r - .5) * TILE;
       for (const [dr, dc] of [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]] as Array<[number, number]>) {
         const rr = center.r + dr, cc = center.c + dc;
-        if (rr < 1 || rr > 9 || cc < 1 || cc > 9) continue;
+        if (rr < 1 || rr > BOARD_ROWS || cc < 1 || cc > BOARD_COLS) continue;
         const direction = dr < 0 ? 0 : dc > 0 ? 1 : dr > 0 ? 2 : dc < 0 ? 3 : undefined;
         const activeDirection = direction !== undefined && direction === screenDirection;
         g.fillStyle(activeDirection ? C.gold : C.gold, activeDirection ? .55 : .24);
@@ -293,7 +297,7 @@ class TacticalScene extends Phaser.Scene {
       g.fillStyle(C.gold); g.lineStyle(3, C.gold, 1);
       for (const [dr, dc] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as Array<[number, number]>) {
         const rr = center.r + dr, cc = center.c + dc;
-        if (rr < 1 || rr > 9 || cc < 1 || cc > 9) continue;
+        if (rr < 1 || rr > BOARD_ROWS || cc < 1 || cc > BOARD_COLS) continue;
         const mx = PAD + (cc - .5) * TILE, my = PAD + (rr - .5) * TILE;
         // 三角形：尖端指向 (dr,dc)，底边在格中心后方
         g.fillTriangle(mx + dc * 22, my + dr * 22, mx - dc * 8 - dr * 11, my - dr * 8 + dc * 11, mx - dc * 8 + dr * 11, my - dr * 8 - dc * 11);
@@ -313,11 +317,11 @@ export function Board({ model, onCell, onHover, onRight, onDirectionHover, onDir
     tactical.directionHover = direction => current.current.onDirectionHover?.(direction);
     tactical.directionSelect = direction => current.current.onDirection?.(direction);
     scene.current = tactical;
-    const game = new Phaser.Game({ type: Phaser.CANVAS, width: BOARD_SIZE, height: BOARD_SIZE, parent: container.current!,
+    const game = new Phaser.Game({ type: Phaser.CANVAS, width: BOARD_W, height: BOARD_H, parent: container.current!,
       backgroundColor: '#0c0f13', scene: tactical, render: { antialias: true }, audio: { noAudio: true },
       scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH } });
     return () => { game.destroy(true); scene.current = null; };
   }, []);
   useEffect(() => { if (scene.current) { scene.current.dataModel = model; scene.current.paint(); } }, [model]);
-  return <div className={`board-canvas ${model.dropPick ? 'aiming' : ''}`} ref={container} data-testid="board" aria-label="9乘9战术地图" />;
+  return <div className={`board-canvas ${model.dropPick ? 'aiming' : ''}`} ref={container} data-testid="board" aria-label="7乘9战术地图" />;
 }

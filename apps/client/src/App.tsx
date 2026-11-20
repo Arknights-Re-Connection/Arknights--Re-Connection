@@ -331,7 +331,7 @@ export function App() {
       <div className="hero-copy">
         <span className="eyebrow">ARKNIGHTS / RE:CONNECTION</span>
         <h1>再连接<span>战术牌桌</span></h1>
-        <p className="hero-description">将每一次部署，变成突破防线的可能。<br />在九乘九的战场上，用卡牌构筑你的战术。</p>
+        <p className="hero-description">将每一次部署，变成突破防线的可能。<br />在七乘九的战场上，用卡牌构筑你的战术。</p>
         <div className="hero-actions">
           <button className="primary" onClick={() => start('local')}>
             <span className="btn-text">开始本机对局</span>
@@ -352,15 +352,15 @@ export function App() {
         </div>
         <div className="prototype-note">
           <span className="note-badge">OPERATIONS · 02</span>
-          <p>本机双人 · 9×9 战场 · 30 张构筑<br />先进入战术演练，熟悉部署与突破防线。</p>
+          <p>本机双人 · 7×9 战场 · 30 张构筑<br />先进入战术演练，熟悉部署与突破防线。</p>
         </div>
       </div>
       <div className="hero-visual">
         <div className="war-dossier">
           <span className="dossier-header">RHODES ISLAND / OPERATIONS DIVISION</span>
           <h2>行动部署图</h2>
-          <div className="hero-grid">{Array.from({ length: 81 }, (_, i) => <i key={i} className={[13, 22, 31, 40, 49, 58, 67].includes(i) ? 'route' : ''} />)}</div>
-          <small className="grid-label">机密 · 作战规划 / 09 × 09</small>
+          <div className="hero-grid">{Array.from({ length: 63 }, (_, i) => <i key={i} className={[10, 17, 24, 31, 38, 45, 52].includes(i) ? 'route' : ''} />)}</div>
+          <small className="grid-label">机密 · 作战规划 / 07 × 09</small>
         </div>
         <div className="cover-cards">
           {['v1', 'g1', 'd1'].map(id => (
@@ -420,7 +420,7 @@ export function App() {
           <div className="action-quota"><span>本回合部署</span><b>{game.players[game.active].deployed}<small>/2</small></b></div>
           <div className="board-key"><span><i className="friendly-dot" /> 我方部署区</span><span><i className="enemy-dot" /> 敌方部署区</span></div>
         </aside>
-        <section className="map-section" ref={mapRef}><div className="map-topline"><span>战场网格 · 9 × 9</span><span>{hovered && gridCoords ? `R${displayPosition(hovered, viewer).r}C${displayPosition(hovered, viewer).c}` : '选择卡牌或干员'}</span></div>
+        <section className="map-section" ref={mapRef}><div className="map-topline"><span>战场网格 · 7 × 9</span><span>{hovered && gridCoords ? `R${displayPosition(hovered, viewer).r}C${displayPosition(hovered, viewer).c}` : '选择卡牌或干员'}</span></div>
           <Board model={boardModel} onCell={cellClick} onHover={setHovered}
             onRight={() => { setDropPick(undefined); setDraggedCard(undefined); }}
             onDirectionHover={direction => setDropPick(current => current && current.direction !== direction ? { ...current, direction } : current)}

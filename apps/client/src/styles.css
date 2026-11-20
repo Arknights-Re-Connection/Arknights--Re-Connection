@@ -394,7 +394,7 @@ a { color: var(--gold); }
 }
 .hero-grid {
   display: grid;
-  grid-template-columns: repeat(9, 1fr);
+  grid-template-columns: repeat(7, 1fr);
   gap: 3px;
   width: 88%;
   height: 250px;
