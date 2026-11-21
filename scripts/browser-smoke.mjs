@@ -132,11 +132,13 @@ try {
         const board = canvas?.getBoundingClientRect();
         const handLabel = document.querySelector('.hand-label');
         const cards = document.querySelectorAll('.hand-card');
+        const ownResource = document.querySelector('.side-panel .own-resource');
         return {
           pageWidth: document.documentElement.scrollWidth,
           board: board ? { width: board.width, height: board.height, left: board.left, right: board.right } : null,
           handFont: handLabel ? Number.parseFloat(getComputedStyle(handLabel).fontSize) : 0,
           cards: cards.length,
+          ownResourceVisible: ownResource ? getComputedStyle(ownResource).display !== 'none' : false,
         };
       });
       assert.ok(layout.board, `找不到 ${width}×${height} 视口的棋盘`);
@@ -145,6 +147,7 @@ try {
       assert.ok(layout.pageWidth <= width, `${width}×${height} 页面出现横向溢出: ${layout.pageWidth}px`);
       assert.ok(layout.handFont >= 10, `${width}×${height} 手牌字号过小: ${layout.handFont}px`);
       assert.ok(layout.cards > 0, `${width}×${height} 没有可操作的手牌`);
+      assert.ok(layout.ownResourceVisible, `${width}×${height} 看不到己方指挥点`);
       await page.screenshot({ path: `artifacts/responsive-${width}x${height}.png` });
     }
     await page.setViewportSize({ width: 1440, height: 1000 });
@@ -152,6 +155,11 @@ try {
   await check('非法拖拽部署被拒绝，合法拖拽部署实际扣费', async () => {
     await dragCard('card-v3', 5, 5); // 非部署区，被拒
     await page.locator('.toast').filter({ hasText: '只能部署' }).waitFor();
+    assert.equal(await page.locator('.board-canvas.aiming').count(), 0);
+    // 回归：非法拖拽被拒后，点击部署格不应复活「点击落点部署」（纯拖拽模式无点击选中）
+    await cell(8, 5);
+    await page.waitForTimeout(150);
+    assert.equal(await page.getByRole('dialog').count(), 0, '非法拖拽后点击部署格不应弹出部署确认');
     assert.equal(await page.locator('.board-canvas.aiming').count(), 0);
     await dragCard('card-v3', 8, 5); // 合法部署区 → 瞄准
     await page.locator('.board-canvas.aiming').waitFor();
@@ -288,6 +296,27 @@ try {
     const clickDeployed = card(uxState, 'blue', 'd3');
     assert.equal(uxState.units[dragDeployed.id].direction, 0);
     assert.equal(uxState.units[clickDeployed.id].direction, 1);
+  });
+  await check('全局指令拖到画布边距区也可释放', async () => {
+    // 构造含 draw 的 demo 存档：把蓝方手牌首张换回牌堆，把 draw 放进手牌
+    const g = structuredClone(initial);
+    const first = g.players.blue.hand.shift();
+    g.players.blue.deck.push(first); g.cards[first].zone = 'deck';
+    const drawId = Object.values(g.cards).find(c => c.owner === 'blue' && c.definition === 'draw').id;
+    g.players.blue.deck = g.players.blue.deck.filter(id => id !== drawId);
+    g.players.blue.hand.push(drawId); g.cards[drawId].zone = 'hand';
+    await page.goto(`${base}/?demo`);
+    await page.locator('canvas').waitFor();
+    await importState(g); await page.getByRole('button', { name: /我是蓝方/ }).click();
+    const drawBox = await page.getByTestId('card-draw').boundingBox();
+    assert.ok(drawBox, '找不到 draw 指令卡');
+    const rect = await page.locator('canvas').boundingBox();
+    await page.mouse.move(drawBox.x + drawBox.width / 2, drawBox.y + drawBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(rect.x + 30, rect.y + rect.height / 2, { steps: 8 }); // 画布左侧边距区（PAD 内，无格子）
+    await page.mouse.up();
+    await page.getByRole('dialog', { name: /使用「/ }).waitFor({ timeout: 3000 });
+    await page.getByRole('button', { name: '取消', exact: true }).click();
   });
   assert.deepEqual(errors, [], `浏览器错误：${errors.join('\n')}`);
   await writeFile('artifacts/browser-results.json', JSON.stringify({ date: new Date().toISOString(), base, checks, browserErrors: errors }, null, 2));

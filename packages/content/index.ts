@@ -1,7 +1,8 @@
 import raw from './test-cards.json';
-import type { CardDefinition } from '../rules/types';
+import type { CardDefinition, Profession } from '../rules/types';
 
 export const CONTENT_VERSION = 'test-cards-0.1';
+const PROFESSIONS: Profession[] = ['先锋', '近卫', '重装', '特种', '狙击', '术士', '医疗', '辅助'];
 function validateContent(value: unknown): CardDefinition[] {
   if (!Array.isArray(value)) throw new Error('卡池必须是数组');
   const ids = new Set<string>();
@@ -12,6 +13,11 @@ function validateContent(value: unknown): CardDefinition[] {
     ids.add(item.id);
     if (item.kind === 'operator' && (!Number.isInteger(item.hp) || item.hp <= 0 ||
       !Number.isInteger(item.block) || item.block < 0 || item.block > 3 || !item.skill ||
+      !PROFESSIONS.includes(item.profession) ||
+      !Number.isInteger(item.power) || item.power < 0 ||
+      !['physical', 'arts', 'true'].includes(item.damage) ||
+      !Number.isInteger(item.armor) || item.armor < 0 || !Number.isInteger(item.resist) || item.resist < 0 ||
+      !['melee', 'ranged'].includes(item.mode) ||
       !Array.isArray(item.range) || item.range.some((p: unknown) => !Array.isArray(p) || p.length !== 2 ||
         p.some((n: unknown) => !Number.isInteger(n) || Math.abs(Number(n)) > 8)))) throw new Error(`干员数据不合法：${item.name}`);
     if (item.kind === 'command' && (!['A', 'B', 'C', 'D'].includes(item.grade) ||

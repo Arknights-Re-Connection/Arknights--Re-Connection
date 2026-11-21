@@ -36,12 +36,6 @@
   --text-dim: #b6c0cb;
   --muted: #77828e;
 
-  /* 语义别名（沿用旧变量名以兼容既有结构） */
-  --ink: #080a0d;
-  --panel: #11151b;
-  --mint: #f0b429;
-  --orange: #d9644a;
-
   /* 字体 */
   --font-display: "Rajdhani", "Oswald", "Segoe UI", system-ui, sans-serif;
   --font-body: "Rajdhani", "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
@@ -737,7 +731,7 @@ a { color: var(--gold); }
   position: absolute;
   z-index: 4;
   top: 24px;
-  right: max(10px, calc((100% - min(100%, 650px)) / 2 + 12px));
+  right: max(10px, calc((100% - min(100%, 660px)) / 2 + 12px));
   display: grid;
   grid-template-columns: 34px auto;
   align-items: center;
@@ -835,7 +829,7 @@ a { color: var(--gold); }
 .cell-queue {
   position: fixed;
   z-index: 35;
-  bottom: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom));
   right: 16px;
   width: 220px;
   padding: 10px;
@@ -1199,7 +1193,11 @@ a { color: var(--gold); }
   .battle { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr) auto; grid-template-areas: "side" "map" "hand"; padding: 10px; }
   .side-panel { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px 12px; overflow: visible; }
   .side-panel .battle-heading { flex: 1 1 100%; border: 0; padding: 0; }
-  .side-panel .mission-info, .side-panel .board-key, .side-panel .log-strip, .side-panel .side-piles, .side-panel .own-resource { display: none; }
+  .side-panel .mission-info, .side-panel .board-key, .side-panel .log-strip, .side-panel .side-piles { display: none; }
+  .side-panel .own-resource .resource { padding-left: 0; }
+  .side-panel .own-resource .eyebrow, .side-panel .own-resource .resource-line { display: none; }
+  .side-panel .own-resource .resource-number { margin-top: 0; gap: 4px; }
+  .side-panel .own-resource .resource-number strong { font-size: 20px; }
   .resource-number strong { font-size: 26px; }
   .pile { width: 40px; height: 48px; }
   .hand-card { flex-basis: 84px; }
@@ -1235,7 +1233,13 @@ a { color: var(--gold); }
   .side-panel .battle-heading { flex: 1 1 100%; border: 0; padding: 0; gap: 4px; }
   .side-panel .battle-heading > div:first-child { display: none; }
   .side-panel .round-info { justify-content: flex-end; width: 100%; }
-  .side-panel .mission-info, .side-panel .board-key, .side-panel .log-strip, .side-panel .side-piles, .side-panel .own-resource, .side-panel .turn-lamps { display: none; }
+  .side-panel .mission-info, .side-panel .board-key, .side-panel .log-strip, .side-panel .side-piles, .side-panel .turn-lamps { display: none; }
+  .side-panel .own-resource { flex: 0 1 auto; }
+  .side-panel .own-resource .resource { padding-left: 0; }
+  .side-panel .own-resource .eyebrow, .side-panel .own-resource .resource-line { display: none; }
+  .side-panel .own-resource .resource-number { margin-top: 0; gap: 4px; }
+  .side-panel .own-resource .resource-number strong { font-size: 22px; }
+  .side-panel .own-resource .resource-number > span:last-child { font-size: 11px; }
   .side-panel .opponent-rail { flex: 1 1 auto; min-width: 0; padding: 6px 8px; gap: 4px; }
   .side-panel .score-panel { margin: 0; }
 
@@ -1245,6 +1249,7 @@ a { color: var(--gold); }
   .board-canvas { height: auto; width: min(100%, calc((100dvh - 300px) * 660 / 820)); max-height: none; }
 
   .friendly-rail { position: sticky; z-index: 20; bottom: env(safe-area-inset-bottom); padding: 8px 9px max(8px, env(safe-area-inset-bottom)); }
+  .cell-queue { bottom: calc(180px + env(safe-area-inset-bottom)); right: 12px; width: min(220px, calc(100vw - 24px)); }
   .hand-label { margin: 0 1px 6px; color: var(--text-dim); font-size: 12px; }
   .hand-label > span:last-child { display: none; }
   .hand-cards { height: clamp(112px, 17dvh, 142px); min-height: 112px; gap: 7px; justify-content: flex-start; overflow-x: auto; overflow-y: hidden; padding: 8px 4px 6px; }
@@ -1275,7 +1280,7 @@ a { color: var(--gold); }
 @media (min-width: 600px) and (max-width: 930px) and (orientation: landscape) {
   .topbar { height: 44px; padding-inline: 12px; }
   .topbar nav button { font-size: 10px; padding: 6px; }
-  .battle { grid-template-columns: 150px minmax(0, 1fr); padding: 7px 12px 118px; gap: 8px; }
+  .battle { height: auto; min-height: 0; grid-template-columns: 150px minmax(0, 1fr); padding: 7px 12px 118px; gap: 8px; }
   .side-panel { padding: 8px; gap: 8px; }
   .side-panel .mission-info, .side-panel .board-key, .side-panel .log-strip { display: none; }
   .friendly-rail { position: sticky; bottom: 0; padding: 6px 8px; }

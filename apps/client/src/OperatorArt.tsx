@@ -16,7 +16,7 @@ const palettes: Record<string, string[]> = {
 
 /** Original vector illustrations. Every card instance has independent SVG gradient/pattern IDs. */
 export function CardArt({ data, large = false }: { data: CardDefinition; large?: boolean }) {
-  const id = useId().replace(/:/g, '');
+  const id = useId().replace(/[^a-zA-Z0-9_-]/g, '');
   const [accent, dark, highlight] = palettes[data.profession ?? '辅助'];
   const heavy = data.profession === '重装', medic = data.profession === '医疗';
   const sniper = data.profession === '狙击', caster = data.profession === '术士' || data.profession === '辅助';

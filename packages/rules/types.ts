@@ -31,7 +31,7 @@ export interface Player {
 export interface LogEntry { id: number; turn: number; text: string }
 export interface GameState {
   schema: 1; rulesVersion: string; contentVersion: string; mode: 'local' | 'demo';
-  turn: number; active: Side; phase: 'action' | 'discard' | 'over'; discardReturn: 'action' | 'over';
+  turn: number; active: Side; phase: 'action' | 'discard' | 'over';
   players: Record<Side, Player>; cards: Record<string, CardInstance>; units: Record<string, Unit>;
   rng: number; sequence: number; revision: number; logs: LogEntry[];
   pendingStart: boolean;

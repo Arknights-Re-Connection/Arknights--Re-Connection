@@ -9,6 +9,8 @@ export const RULES_VERSION = 'prd-v1-prototype-0.1';
 export const BOARD_ROWS = 9;
 export const BOARD_COLS = 7;
 export const CENTER_COL = Math.ceil(BOARD_COLS / 2); // = 4
+// 元素累计爆发阈值（与棋盘维度无关，单独命名避免与 BOARD_ROWS 混淆）
+export const ELEMENT_THRESHOLD = 9;
 export const sides: Side[] = ['blue', 'red'];
 export const other = (side: Side): Side => side === 'blue' ? 'red' : 'blue';
 export const sideName = (side: Side) => side === 'blue' ? '蓝方' : '红方';
@@ -63,9 +65,9 @@ export function capacity(s: GameState, p: Position, side: Side) {
   const enemy = fightersAt(s, p, other(side))[0];
   return enemy ? Math.min(3, definition(s, enemy.id).block!) : 3;
 }
-// 该方单位能否进入此格：不超容量也不超同格 3 人
+// 该方单位能否进入此格：不超容量（capacity 已封顶 3，同格最多 3 人的约束由 capacity 蕴含）
 export function canEnter(s: GameState, p: Position, side: Side) {
-  return inside(p) && unitsAt(s, p, side).length < capacity(s, p, side) && unitsAt(s, p, side).length < 3;
+  return inside(p) && unitsAt(s, p, side).length < capacity(s, p, side);
 }
 // 干员是否被敌方阻挡（被贴脸阻挡时不能主动移动）
 export function blocked(s: GameState, u: Unit) {
@@ -241,7 +243,7 @@ export function newUnit(s: GameState, id: string, p: Position, direction: Direct
 export function createGame(mode: 'local' | 'demo' = 'local', seed = Date.now(), decks: Record<Side, string[]> = { blue: defaultDeck, red: defaultDeck }): GameState {
   for (const side of sides) { const error = validateDeck(decks[side]); if (error) fail(error); }
   const s: GameState = { schema: 1, rulesVersion: RULES_VERSION, contentVersion: CONTENT_VERSION, mode, turn: 1, active: 'blue',
-    phase: 'action', discardReturn: 'action', players: { blue: emptyPlayer(), red: emptyPlayer() }, cards: {}, units: {},
+    phase: 'action', players: { blue: emptyPlayer(), red: emptyPlayer() }, cards: {}, units: {},
     rng: seed >>> 0, sequence: 0, revision: 0, logs: [], pendingStart: false };
   for (const side of sides) {
     decks[side].forEach((definition, i) => {
@@ -329,7 +331,7 @@ export function applyElement(s: GameState, id: string, element: Element, amount 
     if (u.hp <= 0) { defeatCheck(s); return; }
     if (u.immuneUntil >= s.turn) continue;
     u.elements[element]++; u.lastElement[element] = ++s.sequence;
-    if (Object.values(u.elements).reduce((a, b) => a + b, 0) < 9) continue;
+    if (Object.values(u.elements).reduce((a, b) => a + b, 0) < ELEMENT_THRESHOLD) continue;
     const keys: Element[] = ['burn', 'nerve', 'decay'];
     const highest = Math.max(...keys.map(k => u.elements[k]));
     const chosen = keys.filter(k => u.elements[k] === highest).sort((a, b) => u.lastElement[b] - u.lastElement[a])[0];
@@ -365,6 +367,7 @@ function useCommand(s: GameState, a: Extract<Action, { type: 'command' }>) {
     if (target!.cold >= 3) { target!.cold = 0; target!.frozenUntil = s.turn + 2; log(s, `${definition(s, target!.id).name}被冻结，仍提供阻挡`); }
   }
   if (d.effect === 'burn' || d.effect === 'nerve' || d.effect === 'decay') applyElement(s, target!.id, d.effect, d.amount!);
+  // 预留：伤害型指令（当前 test-cards.json 无 damage 效果，未触发；接入正式卡池后可启用）
   if (d.effect === 'damage') { target!.hp -= d.amount!; defeatCheck(s); }
   if (d.effect === 'draw') draw(s, s.active, d.amount!);
   if (d.effect === 'cap') s.players[s.active].cap = Math.min(150, s.players[s.active].cap + d.amount!);
@@ -530,7 +533,7 @@ export function assertState(s: GameState) {
       !Number.isInteger(u.skillOpened) || u.skillOpened < -1 || !Number.isInteger(u.lockUntilOwnTurn) || u.lockUntilOwnTurn < 0 ||
       ['burn', 'nerve', 'decay'].some(key => !Number.isInteger(u.elements[key as Element]) || u.elements[key as Element] < 0 ||
         !Number.isInteger(u.lastElement[key as Element]) || u.lastElement[key as Element] < 0) ||
-      Object.values(u.elements).reduce((a, b) => a + b, 0) > 8 ||
+      Object.values(u.elements).reduce((a, b) => a + b, 0) > ELEMENT_THRESHOLD - 1 ||
       ['charge', 'ammo', 'extraCharge', 'skillK', 'deployed', 'entered', 'frozenUntil', 'burnUntil', 'immuneUntil'].some(key => !Number.isInteger(u[key as keyof Unit]) || Number(u[key as keyof Unit]) < 0)) fail('存档干员状态不合法');
     if (unitsAt(s, u, u.owner).length > 3) fail('存档区块人数超过三人');
     found.add(id);

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { catalog, defaultDeck, definitions, validateDeck } from '../../../packages/content';
 import { actionCost, applyAction, attackRange, blocked, canEnter, createGame, damageValue, definition,
-  deploymentArea, elementName, frozen, getView, inRange, isDeployment, legalMoves, loadGame, moveCost, other, sideName, unitsAt } from '../../../packages/rules/engine';
+  deploymentArea, elementName, ELEMENT_THRESHOLD, frozen, getView, inRange, isDeployment, legalMoves, loadGame, moveCost, other, sideName, unitsAt } from '../../../packages/rules/engine';
 import type { Action, CardInstance, Direction, GameState, Position, Side, Unit } from '../../../packages/rules/types';
 import { Board, displayPosition, screenToBoard } from './Board';
 import type { BoardModel } from './Board';
@@ -18,7 +18,7 @@ const professionShort: Record<string, string> = { 先锋: 'V', 近卫: 'G', 重�
 // 悬浮磁贴定位：锚定在鼠标旁，做视口边缘翻转，避免溢出屏幕
 function tooltipPosition(a: { x: number; y: number } | undefined): React.CSSProperties | undefined {
   if (!a) return undefined;
-  const W = 300, H = 400;
+  const W = 300, H = 480;
   let x = a.x + 22, y = a.y - 40;
   if (x + W > window.innerWidth - 12) x = a.x - W - 22;
   if (x < 12) x = 12;
@@ -127,10 +127,11 @@ export function App() {
     window.addEventListener('pointermove', move, { passive: true });
     return () => window.removeEventListener('pointermove', move);
   }, []);
+  useEffect(() => () => { if (hideTimer.current !== undefined) { clearTimeout(hideTimer.current); hideTimer.current = undefined; } }, []);
   function cancelHideTooltip() { if (hideTimer.current !== undefined) { clearTimeout(hideTimer.current); hideTimer.current = undefined; } }
   function scheduleHideTooltip() { cancelHideTooltip(); hideTimer.current = window.setTimeout(() => setHoveredUnit(undefined), 150); }
   function handleHoverUnit(id?: string) {
-    if (id) { cancelHideTooltip(); setTooltipAnchor({ x: mouseRef.current.x, y: mouseRef.current.y }); setHoveredUnit(id); }
+    if (id) { cancelHideTooltip(); setTooltipAnchor({ x: mouseRef.current.x, y: mouseRef.current.y }); setPreviewed(undefined); setHoveredUnit(id); }
     else scheduleHideTooltip();
   }
   const view = useMemo(() => game ? getView(game, viewer) : undefined, [game, viewer]);
@@ -168,11 +169,6 @@ export function App() {
       lastSaved.current = undefined;
     } catch (e) { setToast(e instanceof Error ? e.message : '存档读取失败'); }
   }
-  function chooseCard(card: CardInstance) {
-    if (!active || !game || game.phase !== 'action') return;
-    setSelected(card.id); setFocused(undefined); setDropPick(undefined);
-    const d = catalog[card.definition]; setIntent(d.kind === 'operator' ? 'deploy' : 'command');
-  }
   function requestCommand(card: CardInstance, target?: string) {
     const d = catalog[card.definition];
     setPending({ action: { type: 'command', card: card.id, target }, title: `使用「${d.name}」`,
@@ -201,20 +197,16 @@ export function App() {
       else setToast('点击箭头格选择部署朝向，或右键取消');
       return;
     }
-    if (intent === 'deploy' && selectedCard) {
-      setPending({ action: { type: 'deploy', card: selectedCard.id, position: p, direction: game.active === 'blue' ? 0 : 2 },
-        title: '确认部署', description: `部署 ${data!.name}，费用 ${selectedCard.cost}。本回合部署 ${game.players[game.active].deployed}/2；刚部署的干员本回合不能主动行动。`, direction: true }); return;
-    }
     if (intent === 'move' && unit) {
       setPending({ action: { type: 'move', unit: unit.id, position: p, direction: unit.direction }, title: '确认移动与朝向',
         description: `移动费用 ${moveCost(game, unit, p)}。若有效抵达敌方目标点，得分后该干员本局永久移除，不返还费用。`, direction: true }); return;
     }
     const options = unitsAt(game, p).filter(u =>
       intent === 'attack' ? u.owner !== viewer && !u.smoke : intent === 'heal' ? u.owner === viewer :
-        intent === 'command' ? data?.target === 'ally' ? u.owner === viewer : u.owner !== viewer : true);
+        intent === 'command' ? data?.target === 'ally' ? u.owner === viewer : u.owner !== viewer && !u.smoke : true);
     setFocused(p);
     if (options.length === 1) chooseUnit(options[0]);
-    else if (options.length > 1) setToast('此格有多名干员，请在右侧队列中选择');
+    else if (options.length > 1) setToast('此格有多名干员，请在队列面板中选择');
     else if (intent !== 'inspect') setToast('此区块没有对应的目标');
     else setSelected(undefined);
   }
@@ -224,22 +216,28 @@ export function App() {
     if (!card || card.owner !== viewer || card.zone !== 'hand') return;
     const canvas = mapRef.current?.querySelector('canvas'); if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    const p = screenToBoard(x, y, rect, viewer);
-    if (!p) return;
     const d = catalog[card.definition];
-    setSelected(id); setDropPick(undefined);
+    setDropPick(undefined);
     if (d.kind === 'operator') {
+      const p = screenToBoard(x, y, rect, viewer);
+      if (!p) return;
       // 拖拽部署：跳过确认弹窗，直接进入 5 格方向选择
       if (game.players[viewer].deployed >= 2) { setToast('本回合已部署两次'); return; }
       if (card.cost > game.players[viewer].cp) { setToast('指挥点不足，无法部署'); return; }
       if (!isDeployment(viewer, p) || !canEnter(game, p, viewer)) { setToast('只能部署在己方部署区的空余格子'); return; }
-      setIntent('deploy'); setDropPick({ cardId: id, position: p });
-    } else if (d.target === 'global') requestCommand(card);
-    else {
-      setIntent('command'); setFocused(p);
-      const targets = unitsAt(game, p).filter(u => d.target === 'ally' ? u.owner === viewer : u.owner !== viewer);
+      setSelected(id); setIntent('deploy'); setDropPick({ cardId: id, position: p });
+    } else if (d.target === 'global') {
+      // 全局指令（draw/cap）无需精确落点，落在画布内即可触发
+      if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return;
+      requestCommand(card);
+    } else {
+      const p = screenToBoard(x, y, rect, viewer);
+      if (!p) return;
+      const targets = unitsAt(game, p).filter(u => d.target === 'ally' ? u.owner === viewer : u.owner !== viewer && !u.smoke);
+      if (targets.length === 0) { setToast('请将指令拖向合法的场上干员'); return; }
+      setSelected(id); setIntent('command'); setFocused(p);
       if (targets.length === 1) requestCommand(card, targets[0].id);
-      else setToast(targets.length ? '此格有多名目标，请从右侧队列选择' : '请将指令拖向合法的场上干员');
+      else setToast('此格有多名目标，请在队列面板中选择');
     }
   }
   function captureHandLayout() {
@@ -260,8 +258,8 @@ export function App() {
   }
   function releaseDrag() {
     const drag = pointerDrag.current;
-    if (drag?.element && drag.dragging && drag.element.hasPointerCapture(drag.pointerId)) {
-      drag.element.releasePointerCapture(drag.pointerId);
+    if (drag?.element && drag.element.hasPointerCapture(drag.pointerId)) {
+      try { drag.element.releasePointerCapture(drag.pointerId); } catch { /* noop */ }
     }
     pointerDrag.current = undefined;
   }
@@ -272,7 +270,6 @@ export function App() {
     if (!drag.dragging) {
       drag.dragging = true;
       captureHandLayout();
-      chooseCard(card);
     }
     const position = mapPositionAt(e.clientX, e.clientY);
     setDraggedCard({ cardId: card.id, x: e.clientX, y: e.clientY, position: position && canDropCard(card, position) ? position : undefined });
@@ -482,7 +479,7 @@ export function App() {
               style={{ '--fan': `${(index - (cards.length - 1) / 2) * 2.4}deg`, '--fan-lift': `${Math.abs(index - (cards.length - 1) / 2) * 2}px`,
                 ...(inHand ? { left: draggedCard.x, top: draggedCard.y } : {}) } as React.CSSProperties}
               data-testid={`card-${card.definition}`} data-card-id={card.id} aria-label={`${d.name}，${card.cost}费`}
-              onMouseEnter={e => { setTooltipAnchor({ x: e.clientX, y: e.clientY }); setPreviewed(card.id); }} onMouseLeave={() => setPreviewed(p => (p === card.id ? undefined : p))}
+              onMouseEnter={e => { cancelHideTooltip(); setHoveredUnit(undefined); setTooltipAnchor({ x: e.clientX, y: e.clientY }); setPreviewed(card.id); }} onMouseLeave={() => setPreviewed(p => (p === card.id ? undefined : p))}
               onPointerDown={e => startCardDrag(card, e)} onPointerMove={e => moveCardDrag(card, e)}
               onPointerUp={endCardDrag} onPointerCancel={cancelCardDrag}>
               <HandCardFace data={d} cost={card.cost} />
@@ -493,7 +490,7 @@ export function App() {
       </section>
     </main>}
 
-    {game && tooltipCardData && tooltipCard && <div className="floating-tooltip card" style={tooltipPosition(tooltipAnchor)} onMouseEnter={cancelHideTooltip} onMouseLeave={cancelHideTooltip}>
+    {game && tooltipCardData && tooltipCard && <div className="floating-tooltip card" style={tooltipPosition(tooltipAnchor)}>
       <div className="tooltip-title"><span>{tooltipCardData.profession ?? `${tooltipCardData.grade} 级指令`} <i>测试卡</i></span><h2>{tooltipCardData.name}</h2></div>
       <CardArt data={tooltipCardData} large />
       <div className="cost-detail"><span>当前费用</span><b>{tooltipCard.cost} ◇</b></div>
@@ -508,7 +505,7 @@ export function App() {
         {frozen(game, hoveredUnitObj) && <span>冻结</span>}{hoveredUnitObj.cold > 0 && <span>寒冷 {hoveredUnitObj.cold} 层</span>}{hoveredUnitObj.smoke && <span>烟雾</span>}{hoveredUnitObj.nerve && <span>神经待发</span>}{hoveredUnitObj.immuneUntil >= game.turn && <span>元素免疫</span>}</div>
       <div className="skill-box"><div><b>{hoveredUnitData.skill!.name}</b><span>{hoveredUnitObj.skillActive ? hoveredUnitData.skill!.type === 'ammo' ? `弹药 ${hoveredUnitObj.ammo}` : '技能生效中' : `${hoveredUnitObj.charge}/${hoveredUnitData.skill!.turns + hoveredUnitObj.extraCharge}`}</span></div>
         <div className="charge-line"><i style={{ width: `${hoveredUnitObj.skillActive ? 100 : 100 * hoveredUnitObj.charge / (hoveredUnitData.skill!.turns + hoveredUnitObj.extraCharge)}%` }} /></div></div>
-      <div className="element-detail"><span>元素累计 {Object.values(hoveredUnitObj.elements).reduce((a, b) => a + b, 0)}/9</span><div>{(['burn', 'nerve', 'decay'] as const).map(e => <small key={e}>{elementName[e]} {hoveredUnitObj.elements[e]}</small>)}</div></div>
+      <div className="element-detail"><span>元素累计 {Object.values(hoveredUnitObj.elements).reduce((a, b) => a + b, 0)}/{ELEMENT_THRESHOLD}</span><div>{(['burn', 'nerve', 'decay'] as const).map(e => <small key={e}>{elementName[e]} {hoveredUnitObj.elements[e]}</small>)}</div></div>
       {hoveredFriendly && active && <div className="operator-actions">
         <button onClick={() => { setSelected(hoveredUnit); setIntent('move'); setHoveredUnit(undefined); }}>移动 <span>{hoveredUnitObj.moved ? '已使用' : '选择范围'}</span></button>
         <button onClick={() => { setSelected(hoveredUnit); setIntent(hoveredUnitData.profession === '医疗' ? 'heal' : 'attack'); setHoveredUnit(undefined); }}>{hoveredUnitData.profession === '医疗' ? '治疗' : '攻击'}<span>{actionCost(game, hoveredUnitObj, hoveredUnitData.profession === '医疗')} ◇</span></button>
@@ -558,6 +555,7 @@ export function App() {
     </Modal>}
     <input ref={importInput} type="file" accept=".json,application/json" hidden onChange={async e => {
       const file = e.target.files?.[0]; if (!file) return;
+      if (file.size > 2 * 1024 * 1024) { setToast('文件过大，导入上限为 2 MB'); e.target.value = ''; return; }
       try { const next = loadGame(await file.text()); setGame(next); setPage('battle'); setHandoff(next.phase === 'over' ? undefined : next.active); setPanel(undefined); setSelected(undefined); setPending(undefined); setToast('对局导入成功'); }
       catch (error) { setToast(error instanceof Error ? error.message : '导入失败，原对局已保留'); }
       e.target.value = '';

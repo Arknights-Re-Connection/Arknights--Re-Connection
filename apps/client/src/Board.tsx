@@ -121,7 +121,21 @@ class TacticalScene extends Phaser.Scene {
       this.lastHoverUnit = ''; this.cellHoverUnit(undefined);
       if (!this.orientationGesture) this.setPreviewDirection(undefined);
     });
+    this.applyDpr();
     this.paint();
+  }
+  // 高分屏适配：Phaser 3.90 已移除 resolution 配置，手动提升 canvas backing store 到 devicePixelRatio 倍，
+  // 并用 camera zoom 补偿，使逻辑坐标保持 BOARD_W×BOARD_H 不变（pointer 坐标与 position/hitUnit 不受影响）。
+  private applyDpr() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    if (dpr <= 1) return;
+    const canvas = this.game.canvas;
+    canvas.width = BOARD_W * dpr;
+    canvas.height = BOARD_H * dpr;
+    const renderer = this.game.renderer as { width: number; height: number };
+    renderer.width = BOARD_W * dpr;
+    renderer.height = BOARD_H * dpr;
+    this.cameras.main.setZoom(dpr);
   }
   private hitUnit(x: number, y: number): string | undefined {
     for (let i = this.unitHits.length - 1; i >= 0; i--) {
@@ -158,16 +172,12 @@ class TacticalScene extends Phaser.Scene {
     return t;
   }
   private resetPool() { for (const t of this.pool) t.setVisible(false); this.poolCursor = 0; }
-  // 静态层：背景、边框、81 格地形 + 等高线 + 部署区斜纹 + 目标点 + 行列号 + 页脚（与视角无关，只画一次）
+  // 静态层：背景、边框、63 格地形（7 列×9 行）+ 等高线 + 部署区斜纹 + 目标点 + 页脚（与视角无关，只画一次）
   private drawStatic() {
     const g = this.staticArt!;
     g.fillStyle(C.bg); g.fillRect(0, 0, BOARD_W, BOARD_H);
     g.lineStyle(2, C.frame); g.strokeRect(PAD - 8, PAD - 8, TILE * BOARD_COLS + 16, TILE * BOARD_ROWS + 16);
     g.lineStyle(1, C.innerLine, .6); g.strokeRect(14, 14, BOARD_W - 28, BOARD_H - 28);
-    for (let row = 1; row <= BOARD_ROWS; row++)
-      this.staticText(25, PAD + (row - .5) * TILE, String(row).padStart(2, '0'), 13);
-    for (let col = 1; col <= BOARD_COLS; col++)
-      this.staticText(PAD + (col - .5) * TILE, 25, String(col).padStart(2, '0'), 13);
     for (let row = 1; row <= BOARD_ROWS; row++) {
       for (let col = 1; col <= BOARD_COLS; col++) {
         const x = PAD + (col - 1) * TILE, y = PAD + (row - 1) * TILE;
@@ -192,18 +202,16 @@ class TacticalScene extends Phaser.Scene {
           for (let k = 10; k < 70; k += 14) g.lineBetween(x + k, y + 66, x + k + 10, y + 76);
         }
         if (isTarget) {
-          const color = row === 9 ? C.gold : C.danger;
+          // 目标点框体与菱形标记（位置对称、与视角无关），文字标注移入动态层按视角判断
           g.fillStyle(C.gold, .5); g.fillRect(x + 12, y + 10, 56, 56);
-          g.lineStyle(2, color, .95); g.strokeRect(x + 14, y + 12, 52, 52);
-          // 菱形目标标记
+          g.lineStyle(2, C.gold, .95); g.strokeRect(x + 14, y + 12, 52, 52);
           g.fillStyle(C.gold, .9);
           g.fillTriangle(x + 40, y + 22, x + 54, y + 38, x + 40, y + 54);
           g.fillTriangle(x + 40, y + 22, x + 26, y + 38, x + 40, y + 54);
-          this.staticText(x + 40, y + 72, row === 9 ? '我方目标' : '敌方目标', 11, row === 9 ? '#f0b429' : '#d9644a');
         }
       }
     }
-    this.staticText(BOARD_W / 2, BOARD_H - 17, 'RHODES ISLAND  /  OPERATIONS MAP 07', 10, C.footer);
+    this.staticText(BOARD_W / 2, BOARD_H - 17, 'RHODES ISLAND  /  OPERATIONS MAP 07×09', 10, C.footer);
   }
   paint() {
     if (!this.art || !this.dataModel) return;
@@ -234,6 +242,18 @@ class TacticalScene extends Phaser.Scene {
         }
       }
     }
+    // 行列号 + 目标点标注：随视角翻转，保证与 hover 显示的坐标一致
+    for (let r = 1; r <= BOARD_ROWS; r++) {
+      const logicR = displayPosition({ r, c: 1 }, m.viewer).r;
+      this.pooled(25, PAD + (r - .5) * TILE, String(logicR).padStart(2, '0'), 13);
+    }
+    for (let c = 1; c <= BOARD_COLS; c++) {
+      const logicC = displayPosition({ r: 1, c }, m.viewer).c;
+      this.pooled(PAD + (c - .5) * TILE, 25, String(logicC).padStart(2, '0'), 13);
+    }
+    // 我方目标始终在屏幕顶部（r=1），敌方目标在底部——翻转视角后依旧成立
+    this.pooled(PAD + 3 * TILE + 40, PAD + 0 * TILE + 72, '我方目标', 11, '#f0b429');
+    this.pooled(PAD + 3 * TILE + 40, PAD + (BOARD_ROWS - 1) * TILE + 72, '敌方目标', 11, '#d9644a');
     // 单位棋子
     const counts = new Map<string, number>();
     for (const u of m.units) {
