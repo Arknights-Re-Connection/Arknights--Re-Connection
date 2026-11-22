@@ -91,6 +91,7 @@ export function App() {
   const handLayout = useRef<Map<string, DOMRect> | undefined>(undefined);
   const pointerDrag = useRef<{ pointerId: number; cardId: string; startX: number; startY: number; dragging: boolean; element?: HTMLElement } | undefined>(undefined);
   const lastSaved = useRef<number | undefined>(undefined);
+  const lastAction = useRef<Action | undefined>(undefined);
   useLayoutEffect(() => {
     const previous = handLayout.current;
     const root = handRef.current;
@@ -131,6 +132,7 @@ export function App() {
   function cancelHideTooltip() { if (hideTimer.current !== undefined) { clearTimeout(hideTimer.current); hideTimer.current = undefined; } }
   function scheduleHideTooltip() { cancelHideTooltip(); hideTimer.current = window.setTimeout(() => setHoveredUnit(undefined), 150); }
   function handleHoverUnit(id?: string) {
+    if (draggedCard) return;
     if (id) { cancelHideTooltip(); setTooltipAnchor({ x: mouseRef.current.x, y: mouseRef.current.y }); setPreviewed(undefined); setHoveredUnit(id); }
     else scheduleHideTooltip();
   }
@@ -150,6 +152,7 @@ export function App() {
     if (!game) return;
     const result = applyAction(game, action);
     if (!result.ok) { setToast(result.error); return; }
+    lastAction.current = action;
     setGame(result.state); setPending(undefined); setDiscardSelection([]); setIntent('inspect');
     if (result.state.active !== game.active && result.state.phase !== 'over') {
       setHandoff(result.state.active); setSelected(undefined); setFocused(undefined); setPreviewed(undefined); setDropPick(undefined);
@@ -253,6 +256,7 @@ export function App() {
   }
   function startCardDrag(card: CardInstance, e: React.PointerEvent<HTMLButtonElement>) {
     if (!active || !game || game.phase !== 'action' || e.button !== 0) return;
+    cancelHideTooltip(); setPreviewed(undefined); setHoveredUnit(undefined);
     pointerDrag.current = { pointerId: e.pointerId, cardId: card.id, startX: e.clientX, startY: e.clientY, dragging: false, element: e.currentTarget };
     e.currentTarget.setPointerCapture(e.pointerId);
   }
@@ -318,6 +322,7 @@ export function App() {
   }, [game, active, intent, selectedCard, unit, viewer, data]);
   const boardModel = useMemo<BoardModel | undefined>(() => game ? ({ viewer, active: game.active, turn: game.turn,
     units: Object.values(game.units).map(u => ({ ...u, data: definition(game, u.id) })), selected,
+    revision: game.revision, action: lastAction.current,
     dropPick: dropPick?.position, dropDirection: dropPick?.direction,
     dropHover: draggedCard?.position,
     highlights: highlighted, focused: hovered ?? focused,  kind: intent === 'command' ? `command-${data?.target}` : intent,
@@ -454,7 +459,7 @@ export function App() {
         </div>
         <div className="log-strip"><span>作战记录</span><p>{game.logs.at(-1)?.text}</p><button onClick={() => setPanel('save')}>日志与存档 ↗</button></div>
       </aside>
-      <section className="map-section" ref={mapRef}>
+      <section className="map-section" ref={mapRef} data-intent={intent}>
         <div className="map-topline"><span>战场网格 · 7 × 9</span><span>{hovered && gridCoords ? `R${displayPosition(hovered, viewer).r}C${displayPosition(hovered, viewer).c}` : '选择卡牌或干员'}</span></div>
         <Board model={boardModel} onCell={cellClick} onHover={setHovered} onHoverUnit={handleHoverUnit}
           onRight={() => { setDropPick(undefined); setDraggedCard(undefined); }}
@@ -509,7 +514,7 @@ export function App() {
       {hoveredFriendly && active && <div className="operator-actions">
         <button onClick={() => { setSelected(hoveredUnit); setIntent('move'); setHoveredUnit(undefined); }}>移动 <span>{hoveredUnitObj.moved ? '已使用' : '选择范围'}</span></button>
         <button onClick={() => { setSelected(hoveredUnit); setIntent(hoveredUnitData.profession === '医疗' ? 'heal' : 'attack'); setHoveredUnit(undefined); }}>{hoveredUnitData.profession === '医疗' ? '治疗' : '攻击'}<span>{actionCost(game, hoveredUnitObj, hoveredUnitData.profession === '医疗')} ◇</span></button>
-        <button onClick={() => onAction({ type: hoveredUnitObj.skillActive ? 'closeSkill' : 'skill', unit: hoveredUnitObj.id })}>{hoveredUnitObj.skillActive ? '关闭技能' : '开启技能'}</button>
+        <button onClick={() => { setHoveredUnit(undefined); onAction({ type: hoveredUnitObj.skillActive ? 'closeSkill' : 'skill', unit: hoveredUnitObj.id }); }}>{hoveredUnitObj.skillActive ? '关闭技能' : '开启技能'}</button>
         <button className="retreat" onClick={() => setPending({ action: { type: 'retreat', unit: hoveredUnitObj.id }, title: '撤退干员', description: `「${hoveredUnitData.name}」洗入弃牌堆，后续部署费 +5，不回复指挥点；撤退不限次数。` })}>撤退</button>
       </div>}
     </div>}

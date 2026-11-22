@@ -33,8 +33,8 @@
 
   /* 文本 */
   --text: #e6ebf2;
-  --text-dim: #b6c0cb;
-  --muted: #77828e;
+  --text-dim: #bfc9d4;
+  --muted: #8794a1;
 
   /* 字体 */
   --font-display: "Rajdhani", "Oswald", "Segoe UI", system-ui, sans-serif;
@@ -1100,15 +1100,293 @@ a { color: var(--gold); }
 }
 
 /* ============================================================================
-   动效
+   伪3D作战终端统一层：透视、景深与画内化反馈
+   （只增强视觉与反馈，不改变既有选择器和布局契约）
    ============================================================================ */
+.app::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(1200px 520px at 50% -12%, rgba(90, 123, 138, .16), transparent 62%),
+    radial-gradient(900px 600px at 50% 118%, rgba(12, 15, 19, .9), transparent 70%);
+}
+/* 注意：这里不能重复声明 .app > *，否则会覆盖后文 .floating-tooltip 的 position:fixed。 */
+
+.topbar {
+  background:
+    linear-gradient(180deg, rgba(29, 36, 45, .86), rgba(12, 15, 19, .95));
+  box-shadow: 0 6px 28px rgba(0, 0, 0, .62), inset 0 -1px rgba(255, 255, 255, .025);
+}
+.topbar::after {
+  width: min(360px, 34vw);
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+  box-shadow: 0 0 18px rgba(240, 180, 41, .45);
+}
+.topbar nav button { transition: color .16s ease, background-color .16s ease, box-shadow .16s ease; }
+.topbar nav button:hover { background: rgba(240, 180, 41, .09); box-shadow: inset 0 -1px var(--gold-dim); }
+
+.primary, .secondary {
+  position: relative;
+  overflow: hidden;
+  backface-visibility: hidden;
+}
+.primary::after, .secondary::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -80%;
+  width: 55%;
+  height: 100%;
+  background: linear-gradient(105deg, transparent, rgba(255, 255, 255, .18), transparent);
+  transform: skewX(-18deg);
+  transition: left .48s cubic-bezier(.2, .8, .2, 1);
+  pointer-events: none;
+}
+.primary:hover::after, .secondary:hover::after { left: 130%; }
+.primary:active:not(:disabled), .secondary:active:not(:disabled), .link-button:active, .icon-button:active {
+  transform: translateY(1px);
+  filter: brightness(.95);
+}
+
+/* 主页：作战档案浮起为终端面板，三张封面形成前后景深 */
+.hero-visual { perspective: 1200px; transform-style: preserve-3d; }
+.war-dossier {
+  transform: rotateX(2deg) rotateY(-4deg) translateZ(0);
+  transform-origin: center;
+  background:
+    linear-gradient(135deg, rgba(90, 123, 138, .1), transparent 46%),
+    linear-gradient(180deg, rgba(29, 36, 45, .96), rgba(17, 21, 27, .9));
+  box-shadow: 0 30px 70px rgba(0, 0, 0, .68), 12px 20px 48px rgba(0, 0, 0, .35), inset 0 1px rgba(255, 255, 255, .04);
+  transition: transform .32s cubic-bezier(.16, 1, .3, 1), box-shadow .32s ease;
+}
+.war-dossier:hover {
+  transform: rotateX(0deg) rotateY(-1deg) translateZ(12px);
+  box-shadow: 0 36px 84px rgba(0, 0, 0, .72), 16px 24px 56px rgba(0, 0, 0, .38), 0 0 28px rgba(90, 123, 138, .12);
+}
+.hero-grid { transform: translateZ(10px); gap: 4px; }
+.hero-grid i {
+  background:
+    linear-gradient(150deg, rgba(90, 123, 138, .16), transparent 58%),
+    var(--bg-4);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .035), inset 0 -2px rgba(0, 0, 0, .28);
+  transition: background-color .18s ease, box-shadow .18s ease;
+}
+.hero-grid i.route { box-shadow: inset 0 1px rgba(255, 255, 255, .18), 0 0 12px var(--gold-glow); }
+.cover-cards { perspective: 900px; }
+.cover-card {
+  background:
+    linear-gradient(145deg, rgba(90, 123, 138, .11), transparent 52%),
+    linear-gradient(180deg, rgba(29, 36, 45, .94), rgba(17, 21, 27, .92));
+  transform-style: preserve-3d;
+  transition: transform .26s cubic-bezier(.2, .8, .2, 1), border-color .2s ease, box-shadow .26s ease;
+}
+.cover-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, transparent 18%, rgba(255, 255, 255, .07) 32%, transparent 48%);
+  opacity: 0;
+  transition: opacity .24s ease;
+  pointer-events: none;
+}
+.cover-card:hover::after { opacity: 1; }
+.cover-card:hover {
+  transform: rotate(-12deg) translateY(4px) scale(1.03) rotateX(4deg);
+  box-shadow: 0 24px 50px rgba(0, 0, 0, .66), 0 0 0 1px var(--gold-dim), 0 0 24px rgba(240, 180, 41, .12);
+}
+.cover-card:nth-child(2):hover { transform: rotate(-2deg) translateY(-24px) scale(1.03) rotateX(4deg); }
+.cover-card:nth-child(3):hover { transform: rotate(12deg) translateY(1px) scale(1.03) rotateX(4deg); }
+.cover-card .card-art.large { transform: translateZ(8px); }
+
+/* 构筑页：卡片作为可拿起的实体卡 */
+.catalog-card {
+  transform-style: preserve-3d;
+  transition: transform .22s cubic-bezier(.2, .8, .2, 1), border-color .2s ease, box-shadow .22s ease, background-color .22s ease;
+}
+.catalog-card:hover {
+  transform: translateY(-5px) rotateX(3deg) scale(1.015);
+  border-color: var(--gold-dim);
+  box-shadow: 0 18px 36px rgba(0, 0, 0, .58), 0 0 0 1px var(--gold-dim);
+}
+
+/* 战斗：左栏压缩为全息作战列；棋盘作为画内投影 */
+.side-panel {
+  background:
+    linear-gradient(180deg, rgba(29, 36, 45, .82), rgba(17, 21, 27, .72));
+  backdrop-filter: blur(14px);
+  box-shadow: inset 1px 0 rgba(255, 255, 255, .02), -12px 0 34px rgba(0, 0, 0, .35);
+}
+.side-panel > * { transition: opacity .18s ease, transform .18s ease, box-shadow .18s ease; }
+.side-panel .turn-lamps .lit { text-shadow: 0 0 12px var(--gold-glow); }
+.side-panel .mission-info {
+  background: linear-gradient(120deg, rgba(240, 180, 41, .12), rgba(90, 123, 138, .05));
+  box-shadow: inset 2px 0 var(--gold), inset 0 1px rgba(255, 255, 255, .03);
+}
+.resource-line i { transition: width .5s cubic-bezier(.16, 1, .3, 1), background-color .2s ease; }
+.resource-number strong { animation: resource-breathe 3.4s ease-in-out infinite; }
+.score-row i.scored { animation: score-pop .42s cubic-bezier(.16, 1, .3, 1) both; }
+
+.map-section { perspective: 1500px; }
+.map-section::before {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  left: 50%;
+  top: 24px;
+  width: min(760px, 96%);
+  height: min(920px, 94%);
+  transform: translateX(-50%);
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(90, 123, 138, .11), transparent 42%),
+    radial-gradient(80% 58% at 50% 60%, rgba(240, 180, 41, .05), transparent 70%);
+  box-shadow: inset 0 2px rgba(255, 255, 255, .035);
+}
+.map-section[data-intent="move"] .map-topline > span:first-child::after,
+.map-section[data-intent="attack"] .map-topline > span:first-child::after,
+.map-section[data-intent="heal"] .map-topline > span:first-child::after,
+.map-section[data-intent="command"] .map-topline > span:first-child::after {
+  content: ' / COMMAND ACTIVE';
+  color: var(--gold);
+}
+.map-topline > span:first-child, .map-bottomline > span:first-child {
+  color: #7f90a0;
+  text-transform: uppercase;
+  letter-spacing: 1.6px;
+}
+.board-canvas {
+  border: 1px solid var(--line-bright);
+  box-shadow:
+    0 0 0 1px var(--bg-0),
+    0 18px 52px rgba(0, 0, 0, .72),
+    0 0 0 2px rgba(90, 123, 138, .12),
+    0 0 46px rgba(90, 123, 138, .08);
+  background: #080c11;
+}
+.board-canvas.aiming {
+  box-shadow:
+    0 0 0 1px var(--bg-0),
+    0 0 0 4px var(--gold-glow),
+    0 24px 62px rgba(0, 0, 0, .76),
+    0 0 48px rgba(240, 180, 41, .26);
+}
+.aiming-hud {
+  background:
+    linear-gradient(135deg, rgba(29, 36, 45, .92), rgba(12, 15, 19, .88));
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .55), 0 0 24px rgba(240, 180, 41, .12), inset 0 1px rgba(255, 255, 255, .07);
+}
+.aiming-hud > i { animation: aim-compass 3s ease-in-out infinite, command-pulse .9s cubic-bezier(.16, 1, .3, 1) both; }
+
+/* 手牌：实体卡、桌面反光和拖拽反馈 */
+.friendly-rail {
+  background:
+    linear-gradient(180deg, rgba(29, 36, 45, .78), rgba(12, 15, 19, .82));
+  backdrop-filter: blur(16px);
+  box-shadow: inset 0 1px rgba(255, 255, 255, .045), 0 -12px 34px rgba(0, 0, 0, .42);
+}
+.friendly-rail .end-turn {
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(240, 180, 41, .24), rgba(240, 180, 41, .12)),
+    linear-gradient(180deg, var(--bg-3), var(--bg-2));
+  box-shadow: inset 0 1px rgba(255, 255, 255, .06), 0 10px 24px rgba(0, 0, 0, .38);
+}
+.friendly-rail .end-turn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 18%, rgba(255, 255, 255, .18) 36%, transparent 54%);
+  transform: translateX(-100%);
+  animation: end-turn-sheen 3.6s cubic-bezier(.2, .8, .2, 1) infinite;
+  pointer-events: none;
+}
+.friendly-rail .end-turn:disabled { filter: saturate(.45) brightness(.82); }
+.hand-card {
+  background:
+    linear-gradient(150deg, rgba(90, 123, 138, .1), transparent 52%),
+    linear-gradient(180deg, rgba(29, 36, 45, .95), rgba(17, 21, 27, .94));
+  transform-style: preserve-3d;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, .45), inset 0 1px rgba(255, 255, 255, .03);
+}
+.hand-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, transparent 20%, rgba(255, 255, 255, .08) 34%, transparent 52%);
+  opacity: 0;
+  transition: opacity .22s ease;
+  pointer-events: none;
+}
+.hand-card:hover:not(:disabled)::after { opacity: 1; }
+.hand-card:hover:not(:disabled) {
+  transform: translateY(-20px) rotate(0) scale(1.14) rotateX(4deg);
+  box-shadow: 0 22px 42px rgba(0, 0, 0, .66), 0 0 0 1px var(--gold-dim), 0 0 24px var(--gold-glow);
+}
+.hand-card .card-art { filter: saturate(1.04) contrast(1.02); }
+
+/* 悬浮磁贴：作为终端浮窗跟随目标 */
+.floating-tooltip {
+  background:
+    linear-gradient(135deg, rgba(29, 36, 45, .94), rgba(12, 15, 19, .92));
+  border-left: 2px solid var(--gold);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, .65), 0 0 28px rgba(90, 123, 138, .08), inset 0 1px rgba(255, 255, 255, .04);
+  backdrop-filter: blur(15px);
+}
+.floating-tooltip .card-art.large {
+  box-shadow: inset 0 2px rgba(255, 255, 255, .05), 0 8px 20px rgba(0, 0, 0, .45);
+}
+.floating-tooltip.unit .operator-actions > button {
+  transition: transform .16s cubic-bezier(.2, .8, .2, 1), background-color .16s ease, border-color .16s ease, box-shadow .16s ease, color .16s ease;
+}
+.floating-tooltip.unit .operator-actions > button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 20px rgba(0, 0, 0, .38), inset 0 1px rgba(255, 255, 255, .04);
+}
+.floating-tooltip.unit .operator-actions > button.active {
+  box-shadow: 0 0 0 1px var(--gold-dim), 0 0 18px var(--gold-glow);
+}
+
+/* 弹窗：军事命令箱 */
+.modal {
+  background:
+    linear-gradient(135deg, rgba(29, 36, 45, .96), rgba(17, 21, 27, .96));
+  box-shadow: 0 40px 100px rgba(0, 0, 0, .82), 0 0 0 2px rgba(90, 123, 138, .1), inset 0 1px rgba(255, 255, 255, .04);
+  animation: modal-arrive .34s cubic-bezier(.16, 1, .3, 1) both;
+}
+.direction-picker button {
+  background:
+    linear-gradient(180deg, rgba(29, 36, 45, .95), rgba(17, 21, 27, .95));
+  box-shadow: inset 0 1px rgba(255, 255, 255, .04), 0 8px 18px rgba(0, 0, 0, .34);
+  transition: transform .16s cubic-bezier(.2, .8, .2, 1), border-color .16s ease, background-color .16s ease, box-shadow .16s ease;
+}
+.direction-picker button:hover { transform: translateY(-3px); box-shadow: 0 12px 24px rgba(0, 0, 0, .4), 0 0 14px rgba(240, 180, 41, .14); }
+.discard-options > button {
+  transition: transform .16s cubic-bezier(.2, .8, .2, 1), border-color .16s ease, background-color .16s ease, box-shadow .16s ease;
+}
+.discard-options > button:hover { transform: translateX(3px); border-color: var(--gold-dim); }
+.discard-options > button.active { box-shadow: inset 0 0 0 1px var(--gold-dim), 0 0 18px rgba(240, 180, 41, .12); }
+
+.toast {
+  background:
+    linear-gradient(135deg, rgba(29, 36, 45, .96), rgba(12, 15, 19, .96));
+  box-shadow: 0 12px 38px rgba(0, 0, 0, .62), 0 0 24px rgba(240, 180, 41, .08);
+  backdrop-filter: blur(14px);
+}
 @keyframes veil-in { from { opacity: 0; } to { opacity: 1; } }
-@keyframes modal-arrive { from { opacity: 0; transform: translateY(10px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
-@keyframes toast-arrive { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
-@keyframes dossier-arrive { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes modal-arrive { from { opacity: 0; transform: translateY(18px) scale(.98) rotateX(-3deg); } to { opacity: 1; transform: translateY(0) scale(1) rotateX(0); } }
+@keyframes toast-arrive { from { opacity: 0; transform: translate(-50%, 12px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes dossier-arrive { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes card-lift { from { opacity: .2; transform: translate(-50%, -46%) rotate(1deg) scale(.9); } to { opacity: .6; transform: translate(-50%, -50%) rotate(-3deg) scale(.98); } }
 @keyframes aim-hud-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes aim-compass { 0%, 100% { box-shadow: 0 0 12px var(--gold-glow); } 50% { box-shadow: 0 0 22px rgba(240, 180, 41, .55); } }
+@keyframes resource-breathe { 0%, 100% { text-shadow: 0 0 10px rgba(240, 180, 41, .18); } 50% { text-shadow: 0 0 18px rgba(240, 180, 41, .34); } }
+@keyframes score-pop { 0% { transform: rotate(45deg) scale(.4); opacity: 0; } 70% { transform: rotate(45deg) scale(1.25); opacity: 1; } 100% { transform: rotate(45deg) scale(1); opacity: 1; } }
+@keyframes end-turn-sheen { 0%, 55% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+@keyframes command-pulse { from { transform: scale(.82); } to { transform: scale(1); } }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
