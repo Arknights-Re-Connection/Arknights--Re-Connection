@@ -466,9 +466,6 @@ class TacticalScene extends Phaser.Scene {
       const logicC = displayPosition({ r: 1, c }, m.viewer).c;
       this.pooled(PAD + (c - .5) * TILE, 25, String(logicC).padStart(2, '0'), 13);
     }
-    this.pooled(PAD + 3 * TILE + 40, PAD + 72, '我方目标', 11, '#f0b429');
-    this.pooled(PAD + 3 * TILE + 40, PAD + (BOARD_ROWS - 1) * TILE + 72, '敌方目标', 11, '#d9644a');
-
     // 非卡牌式数值 HUD：只保留姓名、血条与必要的攻防信息。
     for (const unit of m.units) {
       const layout = layouts.get(unit.id)!;

@@ -51,12 +51,12 @@ async function dragDirection(r, c, dx, dy) {
   await page.mouse.up();
   await page.waitForFunction(() => !document.querySelector('.board-canvas.aiming'));
 }
-// 悬停棋盘上的单位，等待其悬浮磁贴出现
+// 悬停棋盘上的单位，等待右侧情报栏显示该单位
 async function hoverUnitAt(r, c, viewer = 'blue') {
   const rect = await page.locator('canvas').boundingBox();
   const p = cellPoint(rect, r, c, viewer);
   await page.mouse.move(p.x, p.y);
-  await page.locator('.floating-tooltip.unit').waitFor({ timeout: 3000 });
+  await page.locator('.info-panel[data-kind="unit"]').waitFor({ timeout: 3000 });
 }
 async function confirm() {
   const button = page.getByRole('button', { name: '确认执行', exact: true });
@@ -103,10 +103,11 @@ try {
   const initial = await state();
   const blue = def => card(initial, 'blue', def).id;
   const red = def => card(initial, 'red', def).id;
-  await check('桌面布局：左栏+居中棋盘+底部手牌，棋盘为 7 列×9 行', async () => {
+  await check('桌面布局：左栏+居中棋盘+右侧情报栏+底部手牌，棋盘为 7 列×9 行', async () => {
     await page.waitForTimeout(4500);
-    assert.equal(await page.locator('.triangle.up').count(), 1); assert.equal(await page.locator('.triangle.down').count(), 1);
+    assert.equal(await page.locator('.turn-beacon').count(), 1);
     assert.equal(await page.locator('.side-panel').count(), 1);
+    assert.equal(await page.locator('.info-panel').count(), 1);
     assert.equal(await page.locator('.friendly-rail .end-turn').count(), 1);
     const rect = await page.locator('canvas').boundingBox();
     assert.ok(Math.abs(rect.width / rect.height - 660 / 820) < 0.03, `棋盘宽高比异常: ${rect.width}/${rect.height}`);
@@ -132,7 +133,7 @@ try {
         const board = canvas?.getBoundingClientRect();
         const handLabel = document.querySelector('.hand-label');
         const cards = document.querySelectorAll('.hand-card');
-        const ownResource = document.querySelector('.side-panel .own-resource');
+        const ownResource = document.querySelector('.friendly-rail .hand-meta .resource');
         return {
           pageWidth: document.documentElement.scrollWidth,
           board: board ? { width: board.width, height: board.height, left: board.left, right: board.right } : null,
@@ -168,19 +169,19 @@ try {
     assert.equal(s.units[blue('v3')].r, 8); assert.equal(s.units[blue('v3')].deployed, 5);
   });
   await check('主动攻击及一次反击，技能追加攻击与击败涨价', async () => {
-    await hoverUnitAt(6, 6); await page.locator('.floating-tooltip.unit .operator-actions').getByRole('button', { name: /^攻击/ }).click();
+    await hoverUnitAt(6, 6); await page.locator('.info-panel .operator-actions').getByRole('button', { name: /^攻击/ }).click();
     await cell(4, 6); await confirm();
     let s = await state(); assert.equal(s.units[red('c1')].hp, 9); assert.equal(s.units[blue('n1')].hp, 10);
     assert.equal(s.players.blue.cp, 19);
-    await hoverUnitAt(6, 6); await page.locator('.floating-tooltip.unit .operator-actions').getByRole('button', { name: /^开启技能/ }).click();
-    await hoverUnitAt(6, 6); await page.locator('.floating-tooltip.unit .operator-actions').getByRole('button', { name: /^攻击/ }).click(); await cell(4, 6); await confirm();
+    await hoverUnitAt(6, 6); await page.locator('.info-panel .operator-actions').getByRole('button', { name: /^开启技能/ }).click();
+    await hoverUnitAt(6, 6); await page.locator('.info-panel .operator-actions').getByRole('button', { name: /^攻击/ }).click(); await cell(4, 6); await confirm();
     s = await state(); assert.equal(s.units[red('c1')], undefined); assert.equal(s.cards[red('c1')].cost, 21);
     assert.equal(s.cards[red('c1')].zone, 'discard'); assert.equal(s.units[blue('n1')].hp, 2);
     assert.equal(s.units[blue('n1')].ammo, 2); assert.equal(s.players.blue.cp, 17);
   });
   await check('医疗治疗与先锋直线两格推进', async () => {
-    await hoverUnitAt(7, 4); await page.locator('.floating-tooltip.unit .operator-actions').getByRole('button', { name: /^治疗/ }).click(); await cell(6, 4); await confirm();
-    await hoverUnitAt(7, 5); await page.locator('.floating-tooltip.unit .operator-actions').getByRole('button', { name: /^移动/ }).click(); await cell(5, 5); await confirm();
+    await hoverUnitAt(7, 4); await page.locator('.info-panel .operator-actions').getByRole('button', { name: /^治疗/ }).click(); await cell(6, 4); await confirm();
+    await hoverUnitAt(7, 5); await page.locator('.info-panel .operator-actions').getByRole('button', { name: /^移动/ }).click(); await cell(5, 5); await confirm();
     const s = await state(); assert.equal(s.units[blue('g1')].hp, 24); assert.equal(s.units[blue('v1')].r, 5);
     assert.equal(s.players.blue.cp, 12);
   });
@@ -195,7 +196,7 @@ try {
     assert.ok(Object.values(s.cards).some(c => c.owner === 'blue' && c.definition === 'mist' && c.cost === 17 && c.zone === 'discard'));
   });
   await check('撤退进入弃牌堆、不返费、不恢复部署额度', async () => {
-    await hoverUnitAt(8, 5); await page.locator('.floating-tooltip.unit .operator-actions').getByRole('button', { name: /^撤退/ }).click(); await confirm();
+    await hoverUnitAt(8, 5); await page.locator('.info-panel .operator-actions').getByRole('button', { name: /^撤退/ }).click(); await confirm();
     const s = await state(); assert.equal(s.cards[blue('v3')].zone, 'discard'); assert.equal(s.cards[blue('v3')].cost, 8);
     assert.equal(s.players.blue.cp, 3); assert.equal(s.players.blue.deployed, 1);
     await page.screenshot({ path: 'artifacts/battle-played.png' });
@@ -209,7 +210,7 @@ try {
     assert.match(await page.locator('.round-info').innerText(), /红方视角/);
     assert.equal(await page.locator('.enemy-hand .card-back').count(), 1);
     assert.equal(await page.locator('.enemy-hand .hand-card').count(), 0);
-    await hoverUnitAt(4, 4, 'red'); assert.equal(await page.locator('.floating-tooltip.unit .tooltip-title h2').innerText(), '磐石');
+    await hoverUnitAt(4, 4, 'red'); assert.equal(await page.locator('.info-panel[data-kind="unit"] .tooltip-title h2').innerText(), '磐石');
     let s = await state(); assert.equal(s.turn, 6); assert.equal(s.players.red.cp, 32); assert.equal(s.units[red('d1')].cold, 1);
     await page.screenshot({ path: 'artifacts/red-view.png' });
     await page.getByRole('button', { name: /^结束回合/ }).click(); await page.getByRole('button', { name: /我是蓝方/ }).click();
@@ -251,16 +252,16 @@ try {
     assert.match(await page.getByRole('dialog').innerText(), /20 回合/);
     await page.screenshot({ path: 'artifacts/game-over.png' });
   });
-  await check('卡牌悬停磁贴、手持拖拽回位与拖拽部署选向', async () => {
+  await check('卡牌悬停情报栏、手持拖拽回位与拖拽部署选向', async () => {
     await page.goto(`${base}/?demo`);
     await page.locator('canvas').waitFor();
     const operatorCard = page.getByTestId('card-v3');
     const handCount = await page.locator('.friendly-rail .hand-card').count();
     await operatorCard.hover();
-    assert.equal(await page.locator('.floating-tooltip.card .tooltip-title h2').innerText(), '引路');
-    await page.mouse.move(700, 500); // 移开 → 磁贴消失
+    assert.equal(await page.locator('.info-panel[data-kind="card"] .tooltip-title h2').innerText(), '引路');
+    await page.mouse.move(700, 500); // 移开 → 情报栏清空
     await page.waitForTimeout(200);
-    assert.equal(await page.locator('.floating-tooltip.card').count(), 0);
+    assert.equal(await page.locator('.info-panel[data-kind="card"]').count(), 0);
     await page.keyboard.press('Escape');
 
     const handLabel = await page.locator('.hand-label').boundingBox();
