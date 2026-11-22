@@ -53,6 +53,9 @@
    ============================================================================ */
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
+/* 始终预留滚动条槽位：滚动条出现/消失时内容宽度恒定，消除居中布局的横向抖动 */
+html { scrollbar-gutter: stable; }
+html, body { overflow-x: hidden; }
 body { background: var(--bg-0); color: var(--text); }
 button, input { font: inherit; color: inherit; }
 button {
@@ -560,6 +563,7 @@ a { color: var(--gold); }
   background: linear-gradient(180deg, rgba(17, 21, 27, .9), rgba(17, 21, 27, .4));
   border: 1px solid var(--line);
   overflow: visible;
+  min-width: 0;
   min-height: 0;
 }
 .side-panel > * { flex-shrink: 0; }
@@ -793,6 +797,7 @@ a { color: var(--gold); }
   background: linear-gradient(180deg, var(--bg-3), var(--bg-2));
   border: 1px solid var(--line);
   overflow: visible;
+  min-width: 0;
   min-height: 0;
 }
 .info-panel > * { flex-shrink: 0; }
